@@ -1,0 +1,20 @@
+
+cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
+project(PhysicsEngine VERSION 1.0)
+add_definitions(-std=c++26)
+set(CMAKE_CXX_STANDARD 26)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
+set(CMAKE_BUILD_TYPE Debug)
+add_executable(PhysicsEngine main.cpp)
+find_package(glfw3 3.4 REQUIRED)
+find_package(OpenGL REQUIRED)
+find_package(GLEW REQUIRED)
+
+target_include_directories(PhysicsEngine PUBLIC ${OPENGL_INCLUDE_DIR})
+
+target_link_libraries(PhysicsEngine PUBLIC
+    OpenGL::GL
+    glfw
+    GLEW::GLEW
+)
+

@@ -1,0 +1,15 @@
+compile:
+	g++ -o main main.cpp
+
+build:
+	g++ -o main main.cpp
+	./main
+
+run:
+	./main
+
+clean:
+	rm -f main
+
+window:
+	g++ -o main main.cpp -I$(brew --prefix)/include -L$(brew --prefix)/lib -lglfw -framework OpenGL
