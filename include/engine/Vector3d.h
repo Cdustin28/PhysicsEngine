@@ -61,8 +61,10 @@ namespace engine {
             * This should return a real_sqrt, but the damn flag keep showing up. I don't
             * understand why when it is defined to the exact same thing that is passes as.
             */
-            return (real)sqrtf(x*x + y*y + z*z);
+            return real_sqrt(x*x + y*y + z*z);
+
         }
+
 
         real squareMagnitude() const{
             return x*x + y*y + z*z;

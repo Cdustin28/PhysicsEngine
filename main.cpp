@@ -8,16 +8,12 @@
 
 #include <iostream>
 #include "include/engine/Vector3d.h"
+#include "include/engine/particle.h"
+#include "include/Window/Window.h"
 
 #include <GL/glew.h>   // For managing modern OpenGL function pointers
 #pragma comment(lib, "opengl32.lib") // Ensure OpenGL library is linked on Windows
 #include <GLFW/glfw3.h> // For window and context management
-
-
-
-
-
-
 
 using namespace std;
 using namespace engine;
@@ -27,8 +23,15 @@ int OpenGLWindow();
 void framebuffer_size_callback(GLFWwindow*, int, int);
 
 
+
+
+
 int main()
 {
+    Particle myParticle = Particle();
+    myParticle.setMass(10);
+
+
     OpenGLWindow();
     testCases();
     return 0;
@@ -61,7 +64,7 @@ int OpenGLWindow() {
 #endif
 
     // Create window
-    GLFWwindow* window = glfwCreateWindow(800, 600, "OpenGL Window", nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(1600, 1200, "OpenGL Window", nullptr, nullptr);
     if (!window) {
         std::cerr << "Failed to create GLFW window\n";
         glfwTerminate();
@@ -79,7 +82,7 @@ int OpenGLWindow() {
     }
 
     // Set the viewport and callback for resizing
-    glViewport(0, 0, 800, 600);
+    glViewport(0, 0, 1600, 1200);
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
 
     // Main render loop
