@@ -1,2 +1,2 @@
 # PhysicsEngine
-This will be a physics engine with  qt graphics
+This will be a physics engine with  OpenGL graphics
