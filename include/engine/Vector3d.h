@@ -8,6 +8,11 @@
 #include "precision.h"
 
 namespace engine {
+    /**
+     * A class for representing three-dimensional vectors and performing various
+     * vector operations such as addition, subtraction, scaling, normalization,
+     * and computing dot or cross products.
+     */
     class Vector3d {
 
     public:
@@ -29,7 +34,7 @@ namespace engine {
     public:
 
         /**
-        * Default zero constructor
+        *
         */
         Vector3d() : x(), y(), z() {}
 
@@ -43,6 +48,15 @@ namespace engine {
          */
         Vector3d(const real x, const real y, const real z) : x(x), y(y), z(z) {}
 
+
+        const static Vector3d GRAVITY;
+        const static Vector3d HIGH_GRAVITY;
+        const static Vector3d UP;
+        const static Vector3d RIGHT;
+        const static Vector3d OUT_OF_SCREEN;
+        const static Vector3d X;
+        const static Vector3d Y;
+        const static Vector3d Z;
         /**
          *  Flips all the components around the 3d point of origin
          */
@@ -223,6 +237,22 @@ namespace engine {
             return Vector3d(y*vector.z-z*vector.y,
                             z*vector.x-x*vector.z,
                             x*vector.y-y*vector.x);
+        }
+
+        /**
+         * Resets the values of x, y, and z to zero, clearing any existing state.
+         */
+        void clear() {
+            x = y = z = 0;
+        }
+
+        void trim(real size) {
+            if (squareMagnitude() > size*size) {
+                normalize();
+                x *= size;
+                y *= size;
+                z *= size;
+            }
         }
 
     };

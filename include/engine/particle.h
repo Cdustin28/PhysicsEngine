@@ -25,6 +25,13 @@ namespace engine{
         Vector3d velocity;
 
         /**
+         * Accumulates the net force applied to a particle within a physics simulation.
+         * This variable is used to store the total force acting on the particle
+         * until it is cleared, typically after updating the particle's state.
+         */
+        Vector3d forceAcum;
+
+        /**
         * Holds the 3d acceloration of the particle in 3d space
         */
         Vector3d acceleration;
@@ -37,6 +44,7 @@ namespace engine{
         real damping;
 
         real inverseMass;
+
 
     public:
 
@@ -60,39 +68,39 @@ namespace engine{
 
         void setMass(const real mass);
 
-        real GetMass();
+        real GetMass() const;
 
         void setInverseMass(const real inverseMass);
 
-        real GetInverseMass();
+        real GetInverseMass() const;
 
         bool hasFiniteMass() const;
 
         void setDamping(const real damping);
 
-        void getDamping() const;
+        real getDamping() const;
 
         void setPosition(const Vector3d& position);
 
         void setPosition(const real x, const real y, const real z);
 
-        void getPosition(Vector3d& position) const;
+        void getPosition(Vector3d *position) const;
 
         Vector3d getPosistion() const;
 
-        void setVelocity(const Vector3d& velocity);
+        void setVelocity(const Vector3d &velocity);
 
         void setVelocity(const real x, const real y, const real z);
 
-        void getVelocity(Vector3d& velocity) const;
+        void getVelocity(Vector3d *velocity) const;
 
         Vector3d getVelocity() const;
 
-        void setAcceleration(const Vector3d& acceleration);
+        void setAcceleration(const Vector3d &acceleration);
 
         void setAcceleration(const real x, const real y, const real z);
 
-        void getAcceleration(Vector3d& acceleration) const;
+        void getAcceleration(Vector3d *acceleration) const;
 
         Vector3d getAcceloration() const;
 

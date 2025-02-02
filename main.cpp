@@ -30,6 +30,7 @@ int main()
 {
     Particle myParticle = Particle();
     myParticle.setMass(10);
+    myParticle.setVelocity(Vector3d(1, 1, 1));
 
 
     OpenGLWindow();
