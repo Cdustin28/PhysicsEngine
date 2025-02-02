@@ -63,6 +63,13 @@ build CMakeFiles/PhysicsEngine.dir/src/particle.cpp.o: CXX_COMPILER__PhysicsEngi
   OBJECT_DIR = CMakeFiles/PhysicsEngine.dir
   OBJECT_FILE_DIR = CMakeFiles/PhysicsEngine.dir/src
 
+build CMakeFiles/PhysicsEngine.dir/src/Vector3d.cpp.o: CXX_COMPILER__PhysicsEngine_unscanned_Debug /Users/coledustin/Desktop/Coding/PhysicsEngine/src/Vector3d.cpp || cmake_object_order_depends_target_PhysicsEngine
+  DEP_FILE = CMakeFiles/PhysicsEngine.dir/src/Vector3d.cpp.o.d
+  FLAGS = -Wall -g -std=gnu++2b -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk -fcolor-diagnostics   -std=c++26 -F/Library/Developer/CommandLineTools/SDKs/MacOSX15.sdk/System/Library/Frameworks
+  INCLUDES = -iframework /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/System/Library/Frameworks -isystem /opt/homebrew/include
+  OBJECT_DIR = CMakeFiles/PhysicsEngine.dir
+  OBJECT_FILE_DIR = CMakeFiles/PhysicsEngine.dir/src
+
 
 # =============================================================================
 # Link build statements for EXECUTABLE target PhysicsEngine
@@ -71,7 +78,7 @@ build CMakeFiles/PhysicsEngine.dir/src/particle.cpp.o: CXX_COMPILER__PhysicsEngi
 #############################################
 # Link the executable PhysicsEngine
 
-build PhysicsEngine: CXX_EXECUTABLE_LINKER__PhysicsEngine_Debug CMakeFiles/PhysicsEngine.dir/main.cpp.o CMakeFiles/PhysicsEngine.dir/src/particle.cpp.o | /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/System/Library/Frameworks/OpenGL.framework /opt/homebrew/lib/libglfw.3.4.dylib /opt/homebrew/lib/libGLEW.2.2.0.dylib
+build PhysicsEngine: CXX_EXECUTABLE_LINKER__PhysicsEngine_Debug CMakeFiles/PhysicsEngine.dir/main.cpp.o CMakeFiles/PhysicsEngine.dir/src/particle.cpp.o CMakeFiles/PhysicsEngine.dir/src/Vector3d.cpp.o | /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/System/Library/Frameworks/OpenGL.framework /opt/homebrew/lib/libglfw.3.4.dylib /opt/homebrew/lib/libGLEW.2.2.0.dylib
   FLAGS = -Wall -g -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk
   LINK_LIBRARIES = -Wl,-rpath,/opt/homebrew/lib  -framework OpenGL  /opt/homebrew/lib/libglfw.3.4.dylib  /opt/homebrew/lib/libGLEW.2.2.0.dylib  -framework OpenGL
   LINK_PATH = -F/Library/Developer/CommandLineTools/SDKs/MacOSX15.sdk/System/Library/Frameworks
