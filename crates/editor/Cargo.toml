@@ -19,6 +19,7 @@ glam.workspace = true
 # Native-only: OS file dialogs for Save/Open.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rfd = "0.17"
+engine = { path = "../engine", features = ["parallel"] }
 
 # Web-only: async entry point for the browser build.
 [target.'cfg(target_arch = "wasm32")'.dependencies]

@@ -19,12 +19,14 @@
 //! - [`broad_phase`]: which pairs *might* touch (sort-and-sweep)
 //! - [`collision`]: exactly where they touch (contact manifolds)
 //! - [`solver`]: sequential impulses for contacts, friction, and restitution
-//! - [`world`]: owns the bodies and runs a step
+//! - [`fluid`]: SPH particle fluid and its boundary handling
+//! - [`world`]: owns the bodies and fluid and runs a step
 //! - [`scene`], [`presets`]: JSON scene files and built-in examples
 
 pub mod body;
 pub mod broad_phase;
 pub mod collision;
+pub mod fluid;
 pub mod presets;
 pub mod scene;
 pub mod shape;
@@ -33,6 +35,7 @@ pub mod world;
 
 pub use body::{BodyId, RigidBody};
 pub use collision::{ContactPoint, Manifold};
+pub use fluid::{Fluid, FluidParams};
 pub use glam::Vec2;
 pub use scene::{Scene, SceneError};
 pub use shape::Shape;

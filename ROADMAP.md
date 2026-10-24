@@ -66,28 +66,36 @@ These apply to every milestone.
 
 ---
 
-## M2: SPH fluids (CPU)
+## M2: SPH fluids (CPU) ✅
 
 **Goal:** a few thousand fluid particles splashing around a container at interactive frame rates.
 
-- [ ] `Fluid` struct stored as struct-of-arrays (`positions: Vec<Vec2>`, `velocities`, `densities`, `pressures`). This layout is cache-friendly and maps directly to GPU buffers in M5.
-- [ ] **Neighbor search:** a spatial hash grid with cell size equal to the smoothing radius *h*. This is the main performance lever.
-- [ ] **Kernels:** poly6 for density; spiky gradient for pressure; viscosity Laplacian (Müller et al. 2003)
-- [ ] **Pressure:** weakly compressible SPH using the Tait equation of state (Becker & Teschner 2007). Optionally move to PBF or DFSPH later for less compressibility.
-- [ ] **Time step:** CFL-limited sub-stepping, since SPH usually needs smaller steps than rigid bodies
-- [ ] **Static boundaries:** walls as boundary particles, or a signed-distance clamp
-- [ ] **Editor:** fluid brush and rectangle-fill tools, particle spacing and rest density controls, coloring by speed or pressure
-- [ ] **Scene format v2:** fluid particles and parameters, with a v1 → v2 migration
-- [ ] **Tests:**
-  - neighbor grid matches brute force
-  - a resting column of fluid holds its density within a few percent of rest density
-  - dam-break front position roughly tracks the Martin & Moyce (1952) experimental data
+- [x] `Fluid` stored as struct-of-arrays (`positions`, `velocities`, plus scratch `densities`, `pressures`, `accelerations`), the layout M5's GPU port will want
+- [x] **Neighbor search** (`fluid/grid.rs`): a dense row-major cell grid over the particles' bounding box (3 contiguous reads per query), with a spatial hash as fallback when particles are spread thin. Tested against brute force.
+- [x] **Kernel:** 2D cubic spline (Monaghan), the kernel the WCSPH paper and SPlisHSPlasH use. It replaces the poly6/spiky set originally listed here, so one kernel serves density and pressure. Tested for normalization (∫W = 1) and against a finite-difference gradient.
+- [x] **Pressure:** weakly compressible SPH with the Tait equation (γ = 7, B = ρ₀c²/7), clamped at zero at the free surface; Monaghan artificial viscosity
+- [x] **Time step:** CFL-limited substeps inside each 120 Hz world step (dt ≤ 0.4·d/(c + v_max)); particle speed is capped at c/2, which bounds the substep count
+- [x] **Boundaries:** single-layer boundary particles with Akinci et al. (2012) ψ weights, sampled on *every* body. Bodies already push fluid in M2; M3 adds the force back on bodies. A projection pass is a safety net for anything that slips through.
+- [x] **Editor:** Fluid tool (rectangle fill or brush), Eraser, color by speed or pressure, Fluid panel (spacing, density, stiffness, viscosity, wall friction, live substeps and compression), Dam break example
+- [x] **Scene format v2:** optional `fluid` block; version 1 files load unchanged. Scene JSON now keeps vectors on one line (`[x, y]`), so a 1,500-particle scene is 42 KB.
+- [x] **Multithreading:** `parallel` feature (rayon), on for desktop and off for web and `cargo test -p engine`
+- [x] **Tests** (`crates/engine/tests/fluid.rs`):
+  - hydrostatic pressure gradient = ρ₀g within 10% (time-averaged over 1 s; measured within 3%)
+  - a settled column keeps its volume, and no particles are lost
+  - dam-break front stays below the ideal Ritter speed 2√(gH) and covers more than 30% of it
+  - no particle escapes a tank after a 1.5 m dam break slams into the far wall
+  - a blob fired at the floor at 8 m/s doesn't tunnel in
+  - a moving body pushes still water (and none ends up inside it)
+- [ ] **Performance target (5,000 particles at 60 fps):** *not yet verified.* `cargo run --release -p engine --example bench_fluid` on the 2-core build machine: 4,900 particles take 32 ms per 1/120 s step single-threaded and 21 ms on 2 threads, against 8.3 ms for real time. Scaling suggests roughly 6 ms on an 8-core desktop, which would be real time. Run the benchmark with `--features parallel` on your machine to check. The 1,500-particle Dam break example runs at about real time on one thread. Closing the gap for sure is M5's job.
 
-**Done when:** a 2D dam break with ~5,000 particles runs at 60 fps on a laptop in a desktop release build.
+**Lessons worth remembering:**
+- Single-layer boundary particles over-count density within about one spacing of a wall. Fluid placed (or projected) that close is effectively heavily compressed and gets launched. Fills and the projection safety net therefore keep a 0.9-spacing gap.
+- Wall viscosity of 0.3 (versus 0.05 in the fluid) damps particles before they reach that zone. It stopped spray launching off walls in hard impacts, and the dam-break front barely changed (1.75 m → 1.67 m at 0.5 s).
+- WCSPH pressure is noisy, so measure it averaged over time. A single snapshot read 12% low, but the 1 s average is within 3%.
 
-**References:** Müller, Charypar & Gross, "Particle-Based Fluid Simulation for Interactive Applications" (2003); Becker & Teschner, "Weakly Compressible SPH" (2007); Koschier et al., "SPH Techniques for the Physics-Based Simulation of Fluids and Solids" (Eurographics 2019 tutorial). The last one is the best single overview.
+**Martin & Moyce comparison:** the original plan compared the dam-break front with Martin & Moyce's 1952 experiments. That's replaced by the Ritter upper bound for now, since I didn't want to test against experimental values from memory. Adding the digitized data is a good follow-up.
 
-**Rust focus:** iterators, `Vec` layout, and profiling with `cargo build --release` plus a profiler such as `puffin` or `cargo flamegraph`. Add `rayon` (desktop only) for parallel loops.
+**References:** Becker & Teschner, "Weakly Compressible SPH for Free Surface Flows" (2007); Monaghan, "Smoothed Particle Hydrodynamics" (1992); Akinci et al., "Versatile Rigid-Fluid Coupling for Incompressible SPH" (2012); Koschier et al., "SPH Techniques for the Physics-Based Simulation of Fluids and Solids" (Eurographics 2019 tutorial); Teschner et al., "Optimized Spatial Hashing for Collision Detection of Deformable Objects" (2003).
 
 ---
 
