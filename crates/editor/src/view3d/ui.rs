@@ -70,6 +70,8 @@ impl Editor3d {
         let mut chosen = None;
         egui::ComboBox::from_id_salt("examples3d")
             .selected_text("Examples")
+            // Tall enough to list every example without scrolling.
+            .height(600.0)
             .show_ui(ui, |ui| {
                 for &(name, make) in presets::ALL {
                     if ui
@@ -98,6 +100,10 @@ impl Editor3d {
                 ui.selectable_value(&mut self.tool, Tool::Sphere, "Sphere (C)");
                 ui.selectable_value(&mut self.tool, Tool::Box, "Box (B)");
                 ui.selectable_value(&mut self.tool, Tool::Water, "Water (W)");
+            });
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut self.tool, Tool::Joint, "Joint (J)");
+                ui.selectable_value(&mut self.tool, Tool::Chain, "Chain (L)");
             });
             self.tool_options(ui);
 
@@ -155,6 +161,8 @@ impl Editor3d {
                 });
                 ui.weak("Click in the view to place.");
             }
+            Tool::Joint => self.joint_tool_options(ui),
+            Tool::Chain => self.chain_tool_options(ui),
             Tool::Water => {
                 egui::Grid::new("new_water3d")
                     .num_columns(2)
@@ -371,6 +379,20 @@ impl Editor3d {
                     self.pour(rect, p);
                 }
             }
+            Tool::Joint => {
+                if response.clicked_by(PointerButton::Primary)
+                    && let Some(p) = response.interact_pointer_pos()
+                {
+                    self.joint_click(rect, p);
+                }
+            }
+            Tool::Chain => {
+                if response.clicked_by(PointerButton::Primary)
+                    && let Some(p) = response.interact_pointer_pos()
+                {
+                    self.chain_click(rect, p);
+                }
+            }
         }
 
         // --- Drawing.
@@ -386,6 +408,7 @@ impl Editor3d {
                 Color32::DARK_GRAY,
             );
         }
+        self.draw_joints(&painter, rect);
         if self.show_contacts {
             self.draw_contacts(&painter, rect);
         }

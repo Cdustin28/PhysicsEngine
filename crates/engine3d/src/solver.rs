@@ -28,6 +28,7 @@
 
 use crate::body::RigidBody;
 use crate::collision::Manifold;
+use crate::joint::{self, Joint, JointVelocities};
 use glam::{Mat3, Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 
@@ -42,6 +43,9 @@ pub struct SolverSettings {
     /// Impacts slower than this don't bounce, m/s.
     pub restitution_threshold: f32,
     pub warm_starting: bool,
+    /// Rigid-body substeps per world step (see the 2D engine's
+    /// `SolverSettings::substeps`). Chains and ropes stay tighter with 4–8.
+    pub substeps: u32,
 }
 
 impl Default for SolverSettings {
@@ -52,6 +56,7 @@ impl Default for SolverSettings {
             allowed_penetration: 0.005,
             restitution_threshold: 1.0,
             warm_starting: true,
+            substeps: 1,
         }
     }
 }
@@ -85,6 +90,15 @@ impl Velocities {
     fn apply_angular(&mut self, a: usize, b: usize, l: Vec3) {
         self.w[a] -= self.inv_inertia[a] * l;
         self.w[b] += self.inv_inertia[b] * l;
+    }
+
+    fn joint_view(&mut self) -> JointVelocities<'_> {
+        JointVelocities {
+            v: &mut self.v,
+            w: &mut self.w,
+            inv_mass: &self.inv_mass,
+            inv_inertia: &self.inv_inertia,
+        }
     }
 
     /// 1 / effective mass along direction `d` at offsets `ra`/`rb`.
@@ -177,6 +191,7 @@ impl ManifoldConstraint {
 pub fn solve(
     bodies: &mut [RigidBody],
     manifolds: &mut [Manifold],
+    joints: &mut [Joint],
     settings: &SolverSettings,
     dt: f32,
 ) -> PositionCorrection {
@@ -202,6 +217,19 @@ pub fn solve(
             .map(RigidBody::inverse_inertia_world)
             .collect(),
     };
+    // Index n: the immovable world, for joints anchored to a fixed point.
+    vel.v.push(Vec3::ZERO);
+    vel.w.push(Vec3::ZERO);
+    vel.inv_mass.push(0.0);
+    vel.inv_inertia.push(Mat3::ZERO);
+    let world = n;
+    let prepared_joints: Vec<joint::PreparedJoint> = joints
+        .iter()
+        .map(|j| joint::prepare(j, bodies, &vel.joint_view(), world, dt))
+        .collect();
+    for (pj, j) in prepared_joints.iter().zip(joints.iter_mut()) {
+        joint::warm_start(pj, j, &mut vel.joint_view(), settings.warm_starting);
+    }
 
     // --- Prepare.
     let constraints: Vec<ManifoldConstraint> = manifolds
@@ -274,6 +302,10 @@ pub fn solve(
 
     // --- Iterate.
     for _ in 0..settings.velocity_iterations {
+        // Joints first; contacts get the last word.
+        for (pj, j) in prepared_joints.iter().zip(joints.iter_mut()) {
+            joint::solve_velocity(pj, j, &mut vel.joint_view(), dt);
+        }
         for (c, m) in constraints.iter().zip(manifolds.iter_mut()) {
             let impulses: Vec<f32> = m.points.iter().map(|p| p.normal_impulse).collect();
             let limit = c.friction * impulses.iter().sum::<f32>();
@@ -331,16 +363,20 @@ pub fn solve(
 
     // --- Split-impulse position correction on separate pseudo-velocities.
     let mut pseudo = Velocities {
-        v: vec![Vec3::ZERO; n],
-        w: vec![Vec3::ZERO; n],
+        v: vec![Vec3::ZERO; n + 1],
+        w: vec![Vec3::ZERO; n + 1],
         inv_mass: vel.inv_mass,
         inv_inertia: vel.inv_inertia,
     };
+    let mut joint_totals = vec![Vec3::ZERO; joints.len()];
     let mut totals: Vec<Vec<f32>> = constraints
         .iter()
         .map(|c| vec![0.0; c.points.len()])
         .collect();
     for _ in 0..settings.velocity_iterations {
+        for (pj, total) in prepared_joints.iter().zip(&mut joint_totals) {
+            joint::solve_position(pj, total, &mut pseudo.joint_view(), settings.baumgarte, dt);
+        }
         for (c, t) in constraints.iter().zip(&mut totals) {
             for (pc, total) in c.points.iter().zip(t.iter_mut()) {
                 if pc.position_bias == 0.0 && *total == 0.0 {
@@ -353,6 +389,8 @@ pub fn solve(
             }
         }
     }
+    pseudo.v.truncate(n);
+    pseudo.w.truncate(n);
     PositionCorrection {
         v: pseudo.v,
         w: pseudo.w,

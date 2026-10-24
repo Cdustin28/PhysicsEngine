@@ -1,0 +1,354 @@
+{
+  "format": "physicsengine-scene-3d",
+  "version": 3,
+  "world": {
+    "gravity": [0.0, -9.80665, 0.0],
+    "bodies": [
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [10.0, 0.25, 10.0]
+        },
+        "position": [0.0, -0.25, 0.0],
+        "orientation": [0.0, 0.0, 0.0, 1.0],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": true
+      },
+      {
+        "shape": {
+          "type": "sphere",
+          "radius": 0.2
+        },
+        "position": [-2.0358186, 2.8509333, 0.0],
+        "orientation": [0.0, 0.0, 0.0, 1.0],
+        "velocity": [0.0, 0.0, 2.816738],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "sphere",
+          "radius": 0.15
+        },
+        "position": [1.0, 4.0, 0.0],
+        "orientation": [0.0, 0.0, 0.0, 1.0],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "sphere",
+          "radius": 0.15
+        },
+        "position": [2.0, 4.0, 0.0],
+        "orientation": [0.0, 0.0, 0.0, 1.0],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.125, 0.04, 0.04]
+        },
+        "position": [3.0, 4.0, 0.125],
+        "orientation": [0.0, -0.7071068, 0.0, 0.7071068],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.125, 0.04, 0.04]
+        },
+        "position": [3.0, 4.0, 0.375],
+        "orientation": [0.0, -0.7071068, 0.0, 0.7071068],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.125, 0.04, 0.04]
+        },
+        "position": [3.0, 4.0, 0.625],
+        "orientation": [0.0, -0.7071068, 0.0, 0.7071068],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.125, 0.04, 0.04]
+        },
+        "position": [3.0, 4.0, 0.875],
+        "orientation": [0.0, -0.7071068, 0.0, 0.7071068],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.125, 0.04, 0.04]
+        },
+        "position": [3.0, 4.0, 1.125],
+        "orientation": [0.0, -0.7071068, 0.0, 0.7071068],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.125, 0.04, 0.04]
+        },
+        "position": [3.0, 4.0, 1.375],
+        "orientation": [0.0, -0.7071068, 0.0, 0.7071068],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.125, 0.04, 0.04]
+        },
+        "position": [3.0, 4.0, 1.625],
+        "orientation": [0.0, -0.7071068, 0.0, 0.7071068],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.125, 0.04, 0.04]
+        },
+        "position": [3.0, 4.0, 1.875],
+        "orientation": [0.0, -0.7071068, 0.0, 0.7071068],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.125, 0.04, 0.04]
+        },
+        "position": [3.0, 4.0, 2.125],
+        "orientation": [0.0, -0.7071068, 0.0, 0.7071068],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.125, 0.04, 0.04]
+        },
+        "position": [3.0, 4.0, 2.375],
+        "orientation": [0.0, -0.7071068, 0.0, 0.7071068],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.125, 0.04, 0.04]
+        },
+        "position": [3.0, 4.0, 2.625],
+        "orientation": [0.0, -0.7071068, 0.0, 0.7071068],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.125, 0.04, 0.04]
+        },
+        "position": [3.0, 4.0, 2.875],
+        "orientation": [0.0, -0.7071068, 0.0, 0.7071068],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      }
+    ],
+    "solver": {
+      "velocity_iterations": 12,
+      "baumgarte": 0.2,
+      "allowed_penetration": 0.005,
+      "restitution_threshold": 1.0,
+      "warm_starting": true,
+      "substeps": 4
+    },
+    "joints": [
+      {
+        "type": "distance",
+        "min_length": 1.5,
+        "max_length": 1.5,
+        "a": 1,
+        "b": null,
+        "local_anchor_a": [0.0, 0.0, 0.0],
+        "anchor_b": [-3.0, 4.0, 0.0]
+      },
+      {
+        "type": "distance",
+        "min_length": 1.0,
+        "max_length": 1.0,
+        "a": 2,
+        "b": null,
+        "local_anchor_a": [0.0, 0.0, 0.0],
+        "anchor_b": [0.0, 4.0, 0.0]
+      },
+      {
+        "type": "distance",
+        "min_length": 1.0,
+        "max_length": 1.0,
+        "a": 3,
+        "b": 2,
+        "local_anchor_a": [0.0, 0.0, 0.0],
+        "anchor_b": [0.0, 0.0, 0.0]
+      },
+      {
+        "type": "pin",
+        "a": 4,
+        "b": 5,
+        "local_anchor_a": [0.12500001, 0.0, 0.0],
+        "anchor_b": [-0.12500001, 0.0, -0.0]
+      },
+      {
+        "type": "pin",
+        "a": 5,
+        "b": 6,
+        "local_anchor_a": [0.12500001, 0.0, 0.0],
+        "anchor_b": [-0.12500001, 0.0, -0.0]
+      },
+      {
+        "type": "pin",
+        "a": 6,
+        "b": 7,
+        "local_anchor_a": [0.12500001, 0.0, 0.0],
+        "anchor_b": [-0.12500001, 0.0, -0.0]
+      },
+      {
+        "type": "pin",
+        "a": 7,
+        "b": 8,
+        "local_anchor_a": [0.12500001, 0.0, 0.0],
+        "anchor_b": [-0.12500001, 0.0, -0.0]
+      },
+      {
+        "type": "pin",
+        "a": 8,
+        "b": 9,
+        "local_anchor_a": [0.12500001, 0.0, 0.0],
+        "anchor_b": [-0.12500001, 0.0, -0.0]
+      },
+      {
+        "type": "pin",
+        "a": 9,
+        "b": 10,
+        "local_anchor_a": [0.12500001, 0.0, 0.0],
+        "anchor_b": [-0.12500001, 0.0, -0.0]
+      },
+      {
+        "type": "pin",
+        "a": 10,
+        "b": 11,
+        "local_anchor_a": [0.12500001, 0.0, 0.0],
+        "anchor_b": [-0.12500001, 0.0, -0.0]
+      },
+      {
+        "type": "pin",
+        "a": 11,
+        "b": 12,
+        "local_anchor_a": [0.12500001, 0.0, 0.0],
+        "anchor_b": [-0.12500001, 0.0, -0.0]
+      },
+      {
+        "type": "pin",
+        "a": 12,
+        "b": 13,
+        "local_anchor_a": [0.12500001, 0.0, 0.0],
+        "anchor_b": [-0.12500001, 0.0, -0.0]
+      },
+      {
+        "type": "pin",
+        "a": 13,
+        "b": 14,
+        "local_anchor_a": [0.12500001, 0.0, 0.0],
+        "anchor_b": [-0.12500001, 0.0, -0.0]
+      },
+      {
+        "type": "pin",
+        "a": 14,
+        "b": 15,
+        "local_anchor_a": [0.12500001, 0.0, 0.0],
+        "anchor_b": [-0.12500001, 0.0, -0.0]
+      },
+      {
+        "type": "pin",
+        "a": 4,
+        "b": null,
+        "local_anchor_a": [-0.12500001, 0.0, -0.0],
+        "anchor_b": [3.0, 4.0, 0.0]
+      }
+    ]
+  }
+}

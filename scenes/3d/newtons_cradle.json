@@ -1,0 +1,148 @@
+{
+  "format": "physicsengine-scene-3d",
+  "version": 3,
+  "world": {
+    "gravity": [0.0, -9.80665, 0.0],
+    "bodies": [
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [10.0, 0.25, 10.0]
+        },
+        "position": [0.0, -0.25, 0.0],
+        "orientation": [0.0, 0.0, 0.0, 1.0],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": true
+      },
+      {
+        "shape": {
+          "type": "sphere",
+          "radius": 0.25
+        },
+        "position": [-2.2875752, 2.4679112, 0.0],
+        "orientation": [0.0, 0.0, 0.0, 1.0],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 7800.0,
+        "restitution": 1.0,
+        "friction": 0.0,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "sphere",
+          "radius": 0.25
+        },
+        "position": [-0.501, 2.0, 0.0],
+        "orientation": [0.0, 0.0, 0.0, 1.0],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 7800.0,
+        "restitution": 1.0,
+        "friction": 0.0,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "sphere",
+          "radius": 0.25
+        },
+        "position": [0.0, 2.0, 0.0],
+        "orientation": [0.0, 0.0, 0.0, 1.0],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 7800.0,
+        "restitution": 1.0,
+        "friction": 0.0,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "sphere",
+          "radius": 0.25
+        },
+        "position": [0.501, 2.0, 0.0],
+        "orientation": [0.0, 0.0, 0.0, 1.0],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 7800.0,
+        "restitution": 1.0,
+        "friction": 0.0,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "sphere",
+          "radius": 0.25
+        },
+        "position": [1.002, 2.0, 0.0],
+        "orientation": [0.0, 0.0, 0.0, 1.0],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 7800.0,
+        "restitution": 1.0,
+        "friction": 0.0,
+        "is_static": false
+      }
+    ],
+    "solver": {
+      "velocity_iterations": 12,
+      "baumgarte": 0.2,
+      "allowed_penetration": 0.005,
+      "restitution_threshold": 0.05,
+      "warm_starting": true,
+      "substeps": 1
+    },
+    "joints": [
+      {
+        "type": "distance",
+        "min_length": 1.9999999,
+        "max_length": 1.9999999,
+        "a": 1,
+        "b": null,
+        "local_anchor_a": [0.0, 0.0, 0.0],
+        "anchor_b": [-1.002, 4.0, 0.0]
+      },
+      {
+        "type": "distance",
+        "min_length": 2.0,
+        "max_length": 2.0,
+        "a": 2,
+        "b": null,
+        "local_anchor_a": [0.0, 0.0, 0.0],
+        "anchor_b": [-0.501, 4.0, 0.0]
+      },
+      {
+        "type": "distance",
+        "min_length": 2.0,
+        "max_length": 2.0,
+        "a": 3,
+        "b": null,
+        "local_anchor_a": [0.0, 0.0, 0.0],
+        "anchor_b": [0.0, 4.0, 0.0]
+      },
+      {
+        "type": "distance",
+        "min_length": 2.0,
+        "max_length": 2.0,
+        "a": 4,
+        "b": null,
+        "local_anchor_a": [0.0, 0.0, 0.0],
+        "anchor_b": [0.501, 4.0, 0.0]
+      },
+      {
+        "type": "distance",
+        "min_length": 2.0,
+        "max_length": 2.0,
+        "a": 5,
+        "b": null,
+        "local_anchor_a": [0.0, 0.0, 0.0],
+        "anchor_b": [1.002, 4.0, 0.0]
+      }
+    ]
+  }
+}

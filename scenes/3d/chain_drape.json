@@ -1,0 +1,544 @@
+{
+  "format": "physicsengine-scene-3d",
+  "version": 3,
+  "world": {
+    "gravity": [0.0, -9.80665, 0.0],
+    "bodies": [
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [10.0, 0.25, 10.0]
+        },
+        "position": [0.0, -0.25, 0.0],
+        "orientation": [0.0, 0.0, 0.0, 1.0],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": true
+      },
+      {
+        "shape": {
+          "type": "sphere",
+          "radius": 1.0
+        },
+        "position": [0.0, 1.0, 0.0],
+        "orientation": [0.0, 0.0, 0.0, 1.0],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": true
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.10449947, 0.04, 0.04]
+        },
+        "position": [-2.3958333, 2.6, 0.19166666],
+        "orientation": [-0.0, 0.0399044, 0.0, 0.9992035],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.10449947, 0.04, 0.04]
+        },
+        "position": [-2.1875, 2.6, 0.175],
+        "orientation": [-0.0, 0.0399044, 0.0, 0.9992035],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.10449947, 0.04, 0.04]
+        },
+        "position": [-1.9791667, 2.6, 0.15833333],
+        "orientation": [-0.0, 0.0399044, 0.0, 0.9992035],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.10449947, 0.04, 0.04]
+        },
+        "position": [-1.7708334, 2.6, 0.14166667],
+        "orientation": [-0.0, 0.0399044, 0.0, 0.9992035],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.10449947, 0.04, 0.04]
+        },
+        "position": [-1.5625, 2.6, 0.125],
+        "orientation": [-0.0, 0.0399044, 0.0, 0.9992035],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.10449947, 0.04, 0.04]
+        },
+        "position": [-1.3541667, 2.6, 0.108333334],
+        "orientation": [-0.0, 0.0399044, 0.0, 0.9992035],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.10449947, 0.04, 0.04]
+        },
+        "position": [-1.1458334, 2.6, 0.09166666],
+        "orientation": [-0.0, 0.0399044, 0.0, 0.9992035],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.10449947, 0.04, 0.04]
+        },
+        "position": [-0.9375, 2.6, 0.075],
+        "orientation": [-0.0, 0.0399044, 0.0, 0.9992035],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.10449947, 0.04, 0.04]
+        },
+        "position": [-0.72916675, 2.6, 0.058333322],
+        "orientation": [-0.0, 0.0399044, 0.0, 0.9992035],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.10449947, 0.04, 0.04]
+        },
+        "position": [-0.5208334, 2.6, 0.041666657],
+        "orientation": [-0.0, 0.0399044, 0.0, 0.9992035],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.10449947, 0.04, 0.04]
+        },
+        "position": [-0.3125, 2.6, 0.024999991],
+        "orientation": [-0.0, 0.0399044, 0.0, 0.9992035],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.10449947, 0.04, 0.04]
+        },
+        "position": [-0.104166746, 2.6, 0.008333325],
+        "orientation": [-0.0, 0.0399044, 0.0, 0.9992035],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.10449947, 0.04, 0.04]
+        },
+        "position": [0.10416651, 2.6, -0.00833334],
+        "orientation": [-0.0, 0.0399044, 0.0, 0.9992035],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.10449947, 0.04, 0.04]
+        },
+        "position": [0.3125, 2.6, -0.025000006],
+        "orientation": [-0.0, 0.0399044, 0.0, 0.9992035],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.10449947, 0.04, 0.04]
+        },
+        "position": [0.52083325, 2.6, -0.04166667],
+        "orientation": [-0.0, 0.0399044, 0.0, 0.9992035],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.10449947, 0.04, 0.04]
+        },
+        "position": [0.7291665, 2.6, -0.058333352],
+        "orientation": [-0.0, 0.0399044, 0.0, 0.9992035],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.10449947, 0.04, 0.04]
+        },
+        "position": [0.9375, 2.6, -0.075],
+        "orientation": [-0.0, 0.0399044, 0.0, 0.9992035],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.10449947, 0.04, 0.04]
+        },
+        "position": [1.1458333, 2.6, -0.09166668],
+        "orientation": [-0.0, 0.0399044, 0.0, 0.9992035],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.10449947, 0.04, 0.04]
+        },
+        "position": [1.3541665, 2.6, -0.108333334],
+        "orientation": [-0.0, 0.0399044, 0.0, 0.9992035],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.10449947, 0.04, 0.04]
+        },
+        "position": [1.5625, 2.6, -0.12500001],
+        "orientation": [-0.0, 0.0399044, 0.0, 0.9992035],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.10449947, 0.04, 0.04]
+        },
+        "position": [1.770833, 2.6, -0.1416667],
+        "orientation": [-0.0, 0.0399044, 0.0, 0.9992035],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.10449947, 0.04, 0.04]
+        },
+        "position": [1.9791665, 2.6, -0.15833335],
+        "orientation": [-0.0, 0.0399044, 0.0, 0.9992035],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.10449947, 0.04, 0.04]
+        },
+        "position": [2.1875, 2.6, -0.17500003],
+        "orientation": [-0.0, 0.0399044, 0.0, 0.9992035],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.10449947, 0.04, 0.04]
+        },
+        "position": [2.395833, 2.6, -0.19166668],
+        "orientation": [-0.0, 0.0399044, 0.0, 0.9992035],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      }
+    ],
+    "solver": {
+      "velocity_iterations": 12,
+      "baumgarte": 0.2,
+      "allowed_penetration": 0.005,
+      "restitution_threshold": 1.0,
+      "warm_starting": true,
+      "substeps": 4
+    },
+    "joints": [
+      {
+        "type": "pin",
+        "a": 2,
+        "b": 3,
+        "local_anchor_a": [0.10449931, 0.0, -3.7252903e-9],
+        "anchor_b": [-0.104499556, 0.0, 0.0]
+      },
+      {
+        "type": "pin",
+        "a": 3,
+        "b": 4,
+        "local_anchor_a": [0.10449955, 0.0, 1.4901161e-8],
+        "anchor_b": [-0.10449932, 0.0, 1.8626451e-8]
+      },
+      {
+        "type": "pin",
+        "a": 4,
+        "b": 5,
+        "local_anchor_a": [0.10449955, 0.0, 1.4901161e-8],
+        "anchor_b": [-0.10449944, 0.0, 9.313226e-9]
+      },
+      {
+        "type": "pin",
+        "a": 5,
+        "b": 6,
+        "local_anchor_a": [0.10449944, 0.0, -9.313226e-9],
+        "anchor_b": [-0.10449955, 0.0, -1.4901161e-8]
+      },
+      {
+        "type": "pin",
+        "a": 6,
+        "b": 7,
+        "local_anchor_a": [0.10449944, 0.0, -1.8626451e-9],
+        "anchor_b": [-0.10449944, 0.0, 1.8626451e-9]
+      },
+      {
+        "type": "pin",
+        "a": 7,
+        "b": 8,
+        "local_anchor_a": [0.104499556, 0.0, 0.0],
+        "anchor_b": [-0.10449944, 0.0, 1.8626451e-9]
+      },
+      {
+        "type": "pin",
+        "a": 8,
+        "b": 9,
+        "local_anchor_a": [0.10449944, 0.0, -1.8626451e-9],
+        "anchor_b": [-0.10449955, 0.0, -1.4901161e-8]
+      },
+      {
+        "type": "pin",
+        "a": 9,
+        "b": 10,
+        "local_anchor_a": [0.10449944, 0.0, -9.313226e-9],
+        "anchor_b": [-0.10449944, 0.0, 9.313226e-9]
+      },
+      {
+        "type": "pin",
+        "a": 10,
+        "b": 11,
+        "local_anchor_a": [0.10449955, 0.0, 1.4901161e-8],
+        "anchor_b": [-0.10449944, 0.0, 9.313226e-9]
+      },
+      {
+        "type": "pin",
+        "a": 11,
+        "b": 12,
+        "local_anchor_a": [0.10449943, 0.0, 5.5879354e-9],
+        "anchor_b": [-0.104499556, 0.0, 0.0]
+      },
+      {
+        "type": "pin",
+        "a": 12,
+        "b": 13,
+        "local_anchor_a": [0.10449931, 0.0, -3.7252903e-9],
+        "anchor_b": [-0.104499556, 0.0, 0.0]
+      },
+      {
+        "type": "pin",
+        "a": 13,
+        "b": 14,
+        "local_anchor_a": [0.104499556, 0.0, 0.0],
+        "anchor_b": [-0.10449931, 0.0, 3.7252903e-9]
+      },
+      {
+        "type": "pin",
+        "a": 14,
+        "b": 15,
+        "local_anchor_a": [0.104499556, 0.0, 0.0],
+        "anchor_b": [-0.10449955, 0.0, -1.4901161e-8]
+      },
+      {
+        "type": "pin",
+        "a": 15,
+        "b": 16,
+        "local_anchor_a": [0.10449932, 0.0, -1.8626451e-8],
+        "anchor_b": [-0.10449955, 0.0, -1.4901161e-8]
+      },
+      {
+        "type": "pin",
+        "a": 16,
+        "b": 17,
+        "local_anchor_a": [0.10449955, 0.0, 1.4901161e-8],
+        "anchor_b": [-0.10449932, 0.0, 3.3527613e-8]
+      },
+      {
+        "type": "pin",
+        "a": 17,
+        "b": 18,
+        "local_anchor_a": [0.10449955, 0.0, 1.4901161e-8],
+        "anchor_b": [-0.10449955, 0.0, -1.4901161e-8]
+      },
+      {
+        "type": "pin",
+        "a": 18,
+        "b": 19,
+        "local_anchor_a": [0.10449932, 0.0, -3.3527613e-8],
+        "anchor_b": [-0.10449955, 0.0, -1.4901161e-8]
+      },
+      {
+        "type": "pin",
+        "a": 19,
+        "b": 20,
+        "local_anchor_a": [0.10449955, 0.0, 1.4901161e-8],
+        "anchor_b": [-0.10449931, 0.0, 3.7252903e-9]
+      },
+      {
+        "type": "pin",
+        "a": 20,
+        "b": 21,
+        "local_anchor_a": [0.104499556, 0.0, -1.4901161e-8],
+        "anchor_b": [-0.10449955, 0.0, -1.4901161e-8]
+      },
+      {
+        "type": "pin",
+        "a": 21,
+        "b": 22,
+        "local_anchor_a": [0.10449931, 0.0, -3.7252903e-9],
+        "anchor_b": [-0.10449932, 0.0, 3.3527613e-8]
+      },
+      {
+        "type": "pin",
+        "a": 22,
+        "b": 23,
+        "local_anchor_a": [0.10449979, 0.0, 3.4458935e-8],
+        "anchor_b": [-0.10449931, 0.0, 3.7252903e-9]
+      },
+      {
+        "type": "pin",
+        "a": 23,
+        "b": 24,
+        "local_anchor_a": [0.10449931, 0.0, -3.7252903e-9],
+        "anchor_b": [-0.104499795, 0.0, -4.656613e-9]
+      },
+      {
+        "type": "pin",
+        "a": 24,
+        "b": 25,
+        "local_anchor_a": [0.10449931, 0.0, -3.7252903e-9],
+        "anchor_b": [-0.10449931, 0.0, 3.7252903e-9]
+      }
+    ]
+  }
+}

@@ -4,7 +4,7 @@ A rigid-body and particle-fluid physics engine with an interactive editor, writt
 
 Website: [physicsengine.dev](https://physicsengine.dev) · Simulator in your browser: [physicsengine.dev/sim](https://physicsengine.dev/sim/) · Plan: [ROADMAP.md](ROADMAP.md)
 
-> **Status:** milestone M6 complete. In 2D and 3D, rigid bodies (boxes and circles or spheres) collide, stack, bounce, roll, and slide with friction; SPH water flows around them, and bodies float, sink, and get pushed by it, on the CPU or (desktop) the GPU. The editor switches between 2D and 3D, has undo, and runs in the browser.
+> **Status:** milestone M7. In 2D and 3D, rigid bodies (boxes and circles or spheres) collide, stack, bounce, roll, and slide with friction, and can be joined by pins, rods, ropes, springs, and chains; SPH water flows around them, and bodies float, sink, and get pushed by it, on the CPU or (desktop) the GPU. The editor switches between 2D and 3D, has undo, and runs in the browser. Soft bodies (M8) are next.
 
 ## Running it
 
@@ -46,7 +46,9 @@ trunk serve --release   # then open http://127.0.0.1:8080
 | Play / pause | Space |
 | Single step | `.` |
 | Reset to before Play | R |
-| Tools | V select · C circle · B box · F fluid · E erase · Esc deselect |
+| Tools | V select · C circle · B box · F fluid · E erase · J joint · L chain · Esc deselect |
+| Joints | J, then pick Pin (click where two bodies overlap, or on one to pin it to the world) or Rod / Rope / Spring (drag from one body to another, or to empty space) |
+| Chain | L, then drag: each end is pinned to the body under it (or the world) |
 | Delete selected | Delete / Backspace |
 | Contact overlay | D, or the checkbox under World |
 | Add water | F, then drag a rectangle (or switch to Brush and paint) |
@@ -62,6 +64,8 @@ Click **3D** at the left of the toolbar. Play/Pause, Step, Reset, Undo/Redo, Exa
 | Select | Left-click a body |
 | Place a sphere / box | C or B (or the sidebar), then click: it lands on whatever is under the mouse, or the ground |
 | Add water | W, then click: drops a block of water (size set in the sidebar) onto whatever is under the mouse |
+| Joints | J, then click a body and a second point (another body, or the ground for the world) |
+| Chain | L, then click the two ends |
 | Move | Left-drag a body across the ground plane · Shift+left-drag to raise or lower it · release while playing to throw |
 | Orbit | Right-drag |
 | Pan | Shift+right-drag or middle-drag |
@@ -69,7 +73,7 @@ Click **3D** at the left of the toolbar. Play/Pause, Step, Reset, Undo/Redo, Exa
 | Focus on selection | F |
 | Contact overlay | D |
 
-Scenes save as human-readable JSON. **Open…/Save…** use file dialogs on desktop; in the browser, Open uses the browser's file picker and Save downloads `scene.json`. **Copy JSON/Paste JSON…** work everywhere. Your settings and current scene are remembered between sessions. **Examples** loads the built-in scenes (demo, 55-box pyramid, friction ramps, bouncing balls, dam break, buoyancy). The same scenes are in [`scenes/`](scenes) (3D ones in `scenes/3d/`); regenerate them with `cargo run -p engine --example make_scenes` and `cargo run -p engine3d --example make_scenes`. Opening a 3D scene switches the editor to 3D, and vice versa.
+Scenes save as human-readable JSON. **Open…/Save…** use file dialogs on desktop; in the browser, Open uses the browser's file picker and Save downloads `scene.json`. **Copy JSON/Paste JSON…** work everywhere. Your settings and current scene are remembered between sessions. **Examples** loads the built-in scenes (demo, pyramid, friction ramps, bouncing balls, dam break, buoyancy, pendulums, rope bridge, Newton's cradle, springs, and in 3D a chain drape). The same scenes are in [`scenes/`](scenes) (3D ones in `scenes/3d/`); regenerate them with `cargo run -p engine --example make_scenes` and `cargo run -p engine3d --example make_scenes`. Opening a 3D scene switches the editor to 3D, and vice versa.
 
 ## Layout
 
@@ -80,10 +84,12 @@ crates/
     tests/physics.rs   rigid-body validation against known answers
     tests/fluid.rs     fluid validation (hydrostatics, dam break, leaks)
     tests/coupling.rs  fluid ↔ body validation (Archimedes, momentum exchange)
+    tests/joints.rs    joint validation (pendulum period, energy, springs, ropes, chains)
     examples/          make_scenes (regenerate scenes/), bench_fluid (performance)
   engine3d/ 3D: spheres and boxes, SAT contacts, patch friction, SPH water, ray casts, scenes.
     tests/physics3d.rs validation against closed-form answers (sliding, rolling, bouncing, stacking)
     tests/fluid3d.rs   fluid validation (hydrostatics, leaks, Archimedes, momentum exchange)
+    tests/joints3d.rs  joint validation (pendulums incl. conical, springs, chains)
   gpu/      the SPH solvers as wgpu compute shaders (sph.wgsl, sph3d.wgsl); tests check they agree with the CPU
   editor/   eframe/egui app: canvas, tools, inspector, GPU particle renderer, and the 3D view
             (src/view3d: orbit camera, instanced mesh renderer). Builds native and wasm.

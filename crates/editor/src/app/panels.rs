@@ -88,6 +88,8 @@ impl EditorApp {
             let mut chosen = None;
             egui::ComboBox::from_id_salt("examples")
                 .selected_text("Examples")
+                // Tall enough to list every example without scrolling.
+                .height(600.0)
                 .show_ui(ui, |ui| {
                     for &(name, make) in presets::ALL {
                         if ui.selectable_label(false, title_case(name)).clicked() {
