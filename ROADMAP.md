@@ -15,7 +15,7 @@ These apply to every milestone.
 
 ---
 
-## M0: Scaffold ✅ (this PR)
+## M0: Scaffold ✅
 
 **Goal:** a working app skeleton you can build on, on every platform.
 
@@ -32,29 +32,37 @@ These apply to every milestone.
 
 ---
 
-## M1: 2D rigid-body collisions
+## M1: 2D rigid-body collisions ✅
 
 **Goal:** stacks of boxes and circles that collide, bounce, slide, and come to rest without jitter.
 
-- [ ] **Broad phase:** a uniform grid or sort-and-sweep on bounding circles/AABBs to find candidate pairs. Start with brute-force O(n²) as the reference implementation and test the faster one against it.
-- [ ] **Narrow phase:**
-  - [ ] circle–circle
-  - [ ] circle–box (closest point on a rotated box)
-  - [ ] box–box with the Separating Axis Theorem, plus clipping to get a two-point contact manifold
-- [ ] **Contact solver:** sequential impulses with accumulated impulse clamping, restitution, and Coulomb friction
-- [ ] **Stability:** position correction (Baumgarte or split impulses), warm starting, multiple solver iterations
-- [ ] **Sleeping** (optional): bodies at rest stop integrating until something touches them
-- [ ] **Editor:** debug overlay for contact points and normals, and a rotate handle on the selected body
-- [ ] **Tests:**
-  - momentum conserved in an elastic circle collision
-  - a 10-box stack settles and stays put for 10 s
-  - a body on a slope slides only when `tan θ > μ`
+- [x] **Broad phase:** sort-and-sweep on AABBs (`broad_phase.rs`), tested against a brute-force O(n²) reference on 50 random scenes
+- [x] **Narrow phase** (`collision.rs`):
+  - [x] circle–circle
+  - [x] circle–box (closest point on a rotated box, including center-inside)
+  - [x] box–box with the Separating Axis Theorem, plus reference-face clipping for a two-point manifold
+- [x] **Contact solver** (`solver.rs`): sequential impulses with accumulated impulse clamping, restitution, and Coulomb friction
+- [x] **Stability:**
+  - [x] Warm starting, matched across steps by feature id
+  - [x] Block solver for two-point contacts. Solving the two points one at a time left a residual twist that made boxes creep.
+  - [x] Split-impulse position correction. Plain Baumgarte made overlapping bodies fly apart and dead (e = 0) balls bounce.
+- [ ] **Sleeping:** deferred. Stacks already come fully to rest, so it's only a performance optimization now. Revisit in M5.
+- [x] **Editor:** contact point/normal overlay (D), rotate handle on the selected body, solver settings panel, Examples menu
+- [x] **Tests** (`crates/engine/tests/physics.rs`), all checked against known answers:
+  - equal-mass elastic collision swaps velocities; unequal masses match the 1D elastic formulas
+  - momentum is conserved in glancing box–circle collisions
+  - a 10-box stack and the 55-box pyramid stand for 10 s (the pyramid's worst drift is about 2 mm)
+  - a block holds on a 20° ramp and slides on a 35° ramp at g(sin θ − μ cos θ), within 5%
+  - bounce height ≈ e²h for e = 0.5 and 0.9; e = 0 doesn't bounce
+  - overlapping bodies separate without being launched
 
-**Done when:** a pyramid of 50+ boxes stands stable at 120 Hz, and dropped objects bounce according to their restitution.
+**Done when:** a pyramid of 50+ boxes stands stable at 120 Hz, and dropped objects bounce according to their restitution. ✅
 
-**References:** Erin Catto's GDC talks and the *Box2D Lite* source (a small, readable sequential-impulse solver); Christer Ericson, *Real-Time Collision Detection*; Ian Millington, *Game Physics Engine Development* (the same book your C++ prototype followed).
+**Scene format:** still version 1. `solver` is a new *optional* field, so older scenes load with default settings.
 
-**Rust focus:** borrowing two bodies mutably at once. Use `split_at_mut` or index pairs, or compute impulses in one pass and apply them in a second.
+**References:** Erin Catto's GDC talks and the *Box2D Lite* source (a small, readable sequential-impulse solver); Box2D v2.4's `b2_contact_solver.cpp` (block solver); Christer Ericson, *Real-Time Collision Detection*; Ian Millington, *Game Physics Engine Development* (the same book your C++ prototype followed).
+
+**Rust pattern used:** the solver copies velocities into flat `Vec`s indexed by body, so it can update two bodies at once without needing two `&mut` borrows into `bodies`. M2's struct-of-arrays fluid uses the same idea.
 
 ---
 

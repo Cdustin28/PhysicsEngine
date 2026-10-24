@@ -32,12 +32,15 @@
       },
       {
         "shape": {
-          "type": "circle",
-          "radius": 0.5
+          "type": "box",
+          "half_extents": [
+            0.5,
+            0.5
+          ]
         },
         "position": [
-          -1.5,
-          4.0
+          -2.0,
+          0.5
         ],
         "angle": 0.0,
         "velocity": [
@@ -59,7 +62,73 @@
           ]
         },
         "position": [
-          1.5,
+          -2.0,
+          1.5
+        ],
+        "angle": 0.0,
+        "velocity": [
+          0.0,
+          0.0
+        ],
+        "angular_velocity": 0.0,
+        "density": 10.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "box",
+          "half_extents": [
+            0.5,
+            0.5
+          ]
+        },
+        "position": [
+          -2.0,
+          2.5
+        ],
+        "angle": 0.0,
+        "velocity": [
+          0.0,
+          0.0
+        ],
+        "angular_velocity": 0.0,
+        "density": 10.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "circle",
+          "radius": 0.5
+        },
+        "position": [
+          0.5,
+          4.0
+        ],
+        "angle": 0.0,
+        "velocity": [
+          0.0,
+          0.0
+        ],
+        "angular_velocity": 0.0,
+        "density": 10.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "box",
+          "half_extents": [
+            0.6,
+            0.3
+          ]
+        },
+        "position": [
+          2.5,
           5.0
         ],
         "angle": 0.4,
@@ -73,6 +142,13 @@
         "friction": 0.5,
         "is_static": false
       }
-    ]
+    ],
+    "solver": {
+      "velocity_iterations": 10,
+      "baumgarte": 0.2,
+      "allowed_penetration": 0.005,
+      "restitution_threshold": 1.0,
+      "warm_starting": true
+    }
   }
 }

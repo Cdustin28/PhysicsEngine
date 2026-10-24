@@ -1,8 +1,12 @@
 //! The simulation world and its time stepping.
 
 use crate::body::{BodyId, RigidBody};
+use crate::broad_phase;
+use crate::collision::{self, Manifold};
+use crate::solver::{self, SolverSettings};
 use glam::Vec2;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Everything that is simulated.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -10,9 +14,17 @@ pub struct World {
     /// Gravitational acceleration, m/s².
     pub gravity: Vec2,
     pub bodies: Vec<RigidBody>,
+    /// Contact solver tuning. Optional in scene files; older scenes without
+    /// it get the defaults.
+    #[serde(default)]
+    pub solver: SolverSettings,
     /// Simulated time elapsed, s. Not saved in scene files.
     #[serde(skip)]
     pub time: f64,
+    /// Contacts found during the last step, including their accumulated
+    /// impulses for warm starting. Not saved in scene files.
+    #[serde(skip)]
+    contacts: Vec<Manifold>,
 }
 
 impl Default for World {
@@ -27,24 +39,15 @@ impl World {
         Self {
             gravity: Vec2::new(0.0, -crate::STANDARD_GRAVITY),
             bodies: Vec::new(),
+            solver: SolverSettings::default(),
             time: 0.0,
+            contacts: Vec::new(),
         }
     }
 
-    /// The scene the editor opens with: a static floor and two objects.
+    /// The scene the editor opens with. See [`crate::presets`].
     pub fn demo() -> Self {
-        use crate::shape::Shape;
-        let mut w = Self::new();
-        w.add_body(RigidBody::new_static(
-            Shape::rect(20.0, 0.5),
-            Vec2::new(0.0, -0.25),
-        ));
-        w.add_body(RigidBody::new(
-            Shape::Circle { radius: 0.5 },
-            Vec2::new(-1.5, 4.0),
-        ));
-        w.add_body(RigidBody::new(Shape::rect(1.0, 1.0), Vec2::new(1.5, 5.0)).with_angle(0.4));
-        w
+        crate::presets::demo()
     }
 
     pub fn add_body(&mut self, body: RigidBody) -> BodyId {
@@ -55,7 +58,12 @@ impl World {
     /// Remove a body. Note that this shifts the indices of every body after
     /// it, so any `BodyId`s you were holding past `id` are now stale.
     pub fn remove_body(&mut self, id: BodyId) -> Option<RigidBody> {
-        (id.0 < self.bodies.len()).then(|| self.bodies.remove(id.0))
+        if id.0 >= self.bodies.len() {
+            return None;
+        }
+        // Cached contacts refer to bodies by index, so they're now wrong.
+        self.contacts.clear();
+        Some(self.bodies.remove(id.0))
     }
 
     pub fn body(&self, id: BodyId) -> Option<&RigidBody> {
@@ -75,32 +83,90 @@ impl World {
             .map(BodyId)
     }
 
-    /// Total kinetic energy, J. Handy for spotting instability: with no
-    /// collisions or forces other than gravity, KE + PE should stay constant.
+    /// Contacts from the most recent step, for debug drawing.
+    pub fn contacts(&self) -> &[Manifold] {
+        &self.contacts
+    }
+
+    /// Total kinetic energy, J.
     pub fn kinetic_energy(&self) -> f32 {
         self.bodies.iter().map(RigidBody::kinetic_energy).sum()
     }
 
+    /// Total linear momentum of the dynamic bodies, kg·m/s.
+    pub fn momentum(&self) -> Vec2 {
+        self.bodies
+            .iter()
+            .filter(|b| !b.is_static)
+            .map(|b| b.mass() * b.velocity)
+            .sum()
+    }
+
     /// Advance the simulation by exactly `dt` seconds.
     ///
-    /// Call this with a *fixed* `dt` (see [`FixedTimestep`]); variable time
-    /// steps make the simulation non-deterministic and, once collisions and
-    /// fluids land, unstable.
+    /// Call this with a *fixed* `dt` (see [`FixedTimestep`]). Variable time
+    /// steps make the simulation non-deterministic and less stable.
+    ///
+    /// One step is:
+    /// 1. **Broad phase:** find pairs whose bounding boxes overlap.
+    /// 2. **Narrow phase:** compute exact contact points for those pairs.
+    /// 3. **Warm start bookkeeping:** carry impulses over from last step's
+    ///    matching contacts.
+    /// 4. **Integrate velocities:** apply gravity and forces.
+    /// 5. **Solve contacts:** adjust velocities so bodies stop moving into each
+    ///    other, and compute a separate position correction for any overlap.
+    /// 6. **Integrate positions** with the corrected velocities, plus the
+    ///    position correction.
     pub fn step(&mut self, dt: f32) {
         assert!(
             dt > 0.0 && dt.is_finite(),
             "time step must be positive, got {dt}"
         );
 
-        // Milestone 1 inserts collision detection and response here:
-        //   broad phase -> narrow phase -> contact solver.
-        // Milestone 2 adds the SPH fluid step and fluid <-> body coupling.
+        let mut contacts: Vec<Manifold> = broad_phase::sweep_and_prune_pairs(&self.bodies)
+            .into_iter()
+            .filter_map(|(i, j)| collision::collide(i, &self.bodies[i], j, &self.bodies[j]))
+            .collect();
+        if self.solver.warm_starting {
+            carry_over_impulses(&self.contacts, &mut contacts);
+        }
 
         let gravity = self.gravity;
         for body in &mut self.bodies {
-            body.integrate(gravity, dt);
+            body.integrate_velocity(gravity, dt);
         }
+
+        let correction = solver::solve(&mut self.bodies, &mut contacts, &self.solver, dt);
+
+        for (i, body) in self.bodies.iter_mut().enumerate() {
+            body.integrate_position(dt);
+            // Push overlapping bodies apart without changing their velocity.
+            if !body.is_static {
+                body.position += correction.v[i] * dt;
+                body.angle += correction.w[i] * dt;
+            }
+        }
+
+        self.contacts = contacts;
         self.time += f64::from(dt);
+    }
+}
+
+/// Copy accumulated impulses from last step's contacts onto this step's,
+/// matching by body pair and feature id.
+fn carry_over_impulses(old: &[Manifold], new: &mut [Manifold]) {
+    let previous: HashMap<(usize, usize), &Manifold> =
+        old.iter().map(|m| ((m.a, m.b), m)).collect();
+    for m in new {
+        let Some(prev) = previous.get(&(m.a, m.b)) else {
+            continue;
+        };
+        for point in &mut m.points {
+            if let Some(p) = prev.points.iter().find(|p| p.feature == point.feature) {
+                point.normal_impulse = p.normal_impulse;
+                point.tangent_impulse = p.tangent_impulse;
+            }
+        }
     }
 }
 
@@ -213,6 +279,18 @@ mod tests {
         let top = w.add_body(RigidBody::new(Shape::Circle { radius: 0.5 }, Vec2::ZERO));
         assert_eq!(w.body_at_point(Vec2::ZERO), Some(top));
         assert_eq!(w.body_at_point(Vec2::new(5.0, 5.0)), None);
+    }
+
+    #[test]
+    fn removing_a_body_clears_cached_contacts() {
+        let mut w = World::demo();
+        for _ in 0..240 {
+            w.step(1.0 / 120.0);
+        }
+        assert!(!w.contacts().is_empty());
+        w.remove_body(BodyId(1));
+        assert!(w.contacts().is_empty());
+        w.step(1.0 / 120.0); // must not panic on stale indices
     }
 
     #[test]
