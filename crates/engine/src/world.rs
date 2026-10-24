@@ -4,6 +4,7 @@ use crate::body::{BodyHandle, BodyId, RigidBody};
 use crate::broad_phase;
 use crate::collision::{self, Manifold};
 use crate::fluid::{CpuSolver, Fluid, FluidSolver};
+use crate::gas::Gas;
 use crate::joint::Joint;
 use crate::soft::{self, SoftBody, SoftSettings};
 use crate::solver::{self, SolverSettings};
@@ -34,6 +35,10 @@ pub struct World {
     pub soft_bodies: Vec<SoftBody>,
     #[serde(default)]
     pub soft: SoftSettings,
+    /// Smoke, dye, and heat on a grid (see [`crate::gas`]). Left out of
+    /// scene files when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gas: Option<Gas>,
     /// Simulated time elapsed, s. Not saved in scene files.
     #[serde(skip)]
     pub time: f64,
@@ -62,6 +67,7 @@ impl PartialEq for World {
             && self.joints == other.joints
             && self.soft_bodies == other.soft_bodies
             && self.soft == other.soft
+            && self.gas == other.gas
     }
 }
 
@@ -82,6 +88,7 @@ impl World {
             joints: Vec::new(),
             soft_bodies: Vec::new(),
             soft: SoftSettings::default(),
+            gas: None,
             time: 0.0,
             contacts: Vec::new(),
             fluid_forces: Vec::new(),
@@ -288,6 +295,10 @@ impl World {
             dt,
             &self.soft,
         );
+        // The air moves around the bodies where they ended up.
+        if let Some(gas) = self.gas.as_mut() {
+            gas.step(&self.bodies, self.gravity, dt);
+        }
         self.time += f64::from(dt);
     }
 

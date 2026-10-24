@@ -22,6 +22,8 @@ pub const ALL: &[Preset] = &[
     ("newtons_cradle", newtons_cradle),
     ("springs", springs),
     ("soft_bodies", soft_bodies),
+    ("smoke_plume", smoke_plume),
+    ("convection", convection),
 ];
 
 /// A 20 m static floor whose top surface is at y = 0.
@@ -304,6 +306,59 @@ pub fn soft_bodies() -> World {
     let mut stiff = SoftBody::blob(Vec2::new(2.5, 3.5), 0.4, 28, 2.0);
     stiff.edge_stiffness = 20_000.0;
     w.soft_bodies.push(stiff);
+    w
+}
+
+/// A smoky fire under a shelf and a few crates: hot air rises around the
+/// obstacles and pools under the shelf.
+pub fn smoke_plume() -> World {
+    use crate::gas::{Emitter, Gas};
+    let mut w = with_floor();
+    let mut gas = Gas::new(Vec2::new(-5.0, 0.0), 0.1, 100, 70);
+    gas.params.smoke_decay = 0.05;
+    gas.emitters.push(Emitter {
+        center: Vec2::new(-2.0, 0.3),
+        radius: 0.3,
+        smoke_rate: 1.5,
+        temperature: 293.15 + 80.0,
+        velocity: Vec2::ZERO,
+    });
+    w.gas = Some(gas);
+    w.add_body(
+        RigidBody::new_static(Shape::rect(2.0, 0.15), Vec2::new(-1.6, 3.5)).with_angle(0.15),
+    );
+    for x in [1.5, 2.3] {
+        w.add_body(RigidBody::new(Shape::rect(0.7, 0.7), Vec2::new(x, 0.35)));
+    }
+    w
+}
+
+/// Convection in a sealed box: a row of heaters along the floor, and air
+/// that cools as it goes (Newton cooling). Warm air rises, cooled air sinks,
+/// and the flow organizes into rolling cells, as in Rayleigh–Bénard
+/// convection.
+pub fn convection() -> World {
+    use crate::gas::{Emitter, Gas};
+    let mut w = World::new();
+    let mut gas = Gas::new(Vec2::new(-4.0, 0.0), 0.08, 100, 40);
+    gas.params.open_top = false;
+    gas.params.thermal_diffusivity = 0.002;
+    for k in 0..20 {
+        let x = -3.8 + 0.4 * k as f32;
+        gas.emitters.push(Emitter {
+            center: Vec2::new(x, 0.05),
+            radius: 0.2,
+            smoke_rate: 0.3,
+            temperature: 293.15 + 20.0,
+            velocity: Vec2::ZERO,
+        });
+    }
+    gas.params.cooling = 0.05;
+    // A little noise so the cells pick a pattern.
+    for (k, h) in gas.heat.iter_mut().enumerate() {
+        *h = ((k * 2654435761) % 1000) as f32 / 1000.0 * 0.5;
+    }
+    w.gas = Some(gas);
     w
 }
 
