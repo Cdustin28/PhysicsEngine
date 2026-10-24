@@ -245,7 +245,7 @@ impl Gas {
     pub fn cell_at(&self, p: Vec2) -> Option<(usize, usize)> {
         let q = (p - self.origin) / self.cell;
         (q.x >= 0.0 && q.y >= 0.0 && (q.x as usize) < self.nx && (q.y as usize) < self.ny)
-            .then(|| (q.x as usize, q.y as usize))
+            .then_some((q.x as usize, q.y as usize))
     }
 
     pub fn is_solid(&self, i: usize, j: usize) -> bool {
@@ -711,8 +711,8 @@ impl Gas {
                 }
             }
         }
-        for k in 0..n {
-            self.pressure[k] = (q[k] / f64::from(h)) as f32;
+        for (p, &qk) in self.pressure.iter_mut().zip(&q) {
+            *p = (qk / f64::from(h)) as f32;
         }
         self.stats.pressure_iterations = iterations as u32;
         self.stats.max_divergence = (0..n)

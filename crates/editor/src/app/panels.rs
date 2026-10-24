@@ -609,7 +609,8 @@ impl EditorApp {
                 ));
             }
             ui.separator();
-            ui.label(format!("KE {:.2} J", self.world.kinetic_energy()));
+            // abs(): an empty sum is -0.0, which would print as "-0.00".
+            ui.label(format!("KE {:.2} J", self.world.kinetic_energy().abs()));
             ui.separator();
             ui.label(format!(
                 "{:.0} Hz × {} steps/frame",
