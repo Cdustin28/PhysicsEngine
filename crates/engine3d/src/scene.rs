@@ -3,7 +3,7 @@
 //! ```json
 //! {
 //!   "format": "physicsengine-scene-3d",
-//!   "version": 1,
+//!   "version": 2,
 //!   "world": {
 //!     "gravity": [0.0, -9.80665, 0.0],
 //!     "bodies": [
@@ -18,7 +18,9 @@
 //! }
 //! ```
 //!
-//! `orientation` is a quaternion [x, y, z, w]. Densities are kg/m³.
+//! `orientation` is a quaternion [x, y, z, w]. Densities are kg/m³. A
+//! `fluid` object (particle positions, velocities, and settings) is present
+//! only when the scene has water.
 
 use crate::world::World;
 use serde::{Deserialize, Serialize};
@@ -33,7 +35,9 @@ pub struct Scene {
 
 impl Scene {
     pub const FORMAT: &'static str = "physicsengine-scene-3d";
-    pub const VERSION: u32 = 1;
+    /// 2 added `fluid`. Version 1 files (no fluid) load unchanged.
+    pub const VERSION: u32 = 2;
+    pub const OLDEST_SUPPORTED: u32 = 1;
 
     pub fn from_world(world: &World) -> Self {
         Self {
@@ -53,9 +57,10 @@ impl Scene {
         if scene.format != Self::FORMAT {
             return Err(SceneError::WrongFormat(scene.format));
         }
-        if scene.version != Self::VERSION {
+        if !(Self::OLDEST_SUPPORTED..=Self::VERSION).contains(&scene.version) {
             return Err(SceneError::UnsupportedVersion(scene.version));
         }
+        scene.version = Self::VERSION;
         if !scene.world.gravity.is_finite() {
             return Err(SceneError::Invalid("gravity must be finite".into()));
         }
@@ -64,6 +69,8 @@ impl Scene {
                 .map_err(|e| SceneError::Invalid(format!("body {i}: {e}")))?;
             body.orientation = body.orientation.normalize();
         }
+        scene.world.fluid.validate().map_err(SceneError::Invalid)?;
+        scene.world.fluid.fill_missing_velocities();
         scene.world.assign_handles();
         Ok(scene)
     }

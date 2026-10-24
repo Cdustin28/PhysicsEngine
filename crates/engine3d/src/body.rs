@@ -213,6 +213,129 @@ impl RigidBody {
         self.orientation = (self.orientation + spin * (0.5 * dt)).normalize();
     }
 
+    /// Nearest point on the surface to a world point, the outward normal
+    /// there, and whether the point is inside the body.
+    pub fn closest_surface_point(&self, world: Vec3) -> (Vec3, Vec3, bool) {
+        let local = self.world_to_local(world);
+        let (surface, normal, inside) = match self.shape {
+            Shape::Sphere { radius } => {
+                let len = local.length();
+                let n = if len > 1e-9 { local / len } else { Vec3::Y };
+                (n * radius, n, len < radius)
+            }
+            Shape::Cuboid { half_extents: h } => {
+                let clamped = local.clamp(-h, h);
+                if clamped != local {
+                    (clamped, (local - clamped).normalize_or(Vec3::Y), false)
+                } else {
+                    // Inside: leave through the nearest face.
+                    let gap = h - local.abs();
+                    let k = if gap.x <= gap.y && gap.x <= gap.z {
+                        0
+                    } else if gap.y <= gap.z {
+                        1
+                    } else {
+                        2
+                    };
+                    let sign = if local[k] < 0.0 { -1.0 } else { 1.0 };
+                    let mut surface = local;
+                    surface[k] = sign * h[k];
+                    let mut n = Vec3::ZERO;
+                    n[k] = sign;
+                    (surface, n, true)
+                }
+            }
+        };
+        (
+            self.local_to_world(surface),
+            self.orientation * normal,
+            inside,
+        )
+    }
+
+    /// Points about `spacing` apart over the body's surface, moved `inset`
+    /// inward (never more than halfway to the center), in world space. Only
+    /// the part of the surface inside `region` (world min, max corners) is
+    /// sampled: a 20 m floor at fluid resolution would otherwise be hundreds
+    /// of thousands of points, nearly all far from any water. Used as the
+    /// fluid's boundary particles.
+    pub fn sample_surface(
+        &self,
+        spacing: f32,
+        inset: f32,
+        region: (Vec3, Vec3),
+        out: &mut Vec<Vec3>,
+    ) {
+        let inside_region = |p: Vec3| p.cmpge(region.0).all() && p.cmple(region.1).all();
+        match self.shape {
+            Shape::Sphere { radius } => {
+                let r = (radius - inset).max(0.5 * radius);
+                // Fibonacci sphere: near-uniform points, no clustering at
+                // the poles.
+                let n = ((4.0 * std::f32::consts::PI * r * r / (spacing * spacing)).ceil()
+                    as usize)
+                    .max(12);
+                let golden = std::f32::consts::PI * (3.0 - 5f32.sqrt());
+                for k in 0..n {
+                    let y = 1.0 - 2.0 * (k as f32 + 0.5) / n as f32;
+                    let ring = (1.0 - y * y).max(0.0).sqrt();
+                    let (s, c) = (golden * k as f32).sin_cos();
+                    let p = self.local_to_world(Vec3::new(ring * c, y, ring * s) * r);
+                    if inside_region(p) {
+                        out.push(p);
+                    }
+                }
+            }
+            Shape::Cuboid { half_extents } => {
+                let h = (half_extents - Vec3::splat(inset)).max(0.5 * half_extents);
+                // Lattice over the box with n[k] intervals per axis; only
+                // points with an index on a face are kept.
+                let n = (2.0 * h / spacing).ceil().max(Vec3::ONE);
+                let step = 2.0 * h / n;
+                let n = [n.x as i32, n.y as i32, n.z as i32];
+                // The region in the box's frame (a conservative box around
+                // its 8 transformed corners), as index ranges.
+                let mut lo = Vec3::splat(f32::INFINITY);
+                let mut hi = Vec3::splat(f32::NEG_INFINITY);
+                for c in 0..8 {
+                    let corner = Vec3::new(
+                        if c & 1 == 0 { region.0.x } else { region.1.x },
+                        if c & 2 == 0 { region.0.y } else { region.1.y },
+                        if c & 4 == 0 { region.0.z } else { region.1.z },
+                    );
+                    let l = self.world_to_local(corner);
+                    lo = lo.min(l);
+                    hi = hi.max(l);
+                }
+                let range = |k: usize| {
+                    let a = ((lo[k] + h[k]) / step[k]).floor().max(0.0) as i32;
+                    let b = ((hi[k] + h[k]) / step[k]).ceil().min(n[k] as f32) as i32;
+                    a..=b
+                };
+                let point = |i: i32, j: i32, k: i32| {
+                    self.local_to_world(-h + Vec3::new(i as f32, j as f32, k as f32) * step)
+                };
+                let (rx, ry, rz) = (range(0), range(1), range(2));
+                for i in rx {
+                    for j in ry.clone() {
+                        let on_face = i == 0 || i == n[0] || j == 0 || j == n[1];
+                        if on_face {
+                            for k in rz.clone() {
+                                out.push(point(i, j, k));
+                            }
+                        } else {
+                            for k in [0, n[2]] {
+                                if rz.contains(&k) {
+                                    out.push(point(i, j, k));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         self.shape.validate()?;
         if !self.is_static && !(self.density.is_finite() && self.density > 0.0) {
@@ -277,5 +400,64 @@ mod tests {
         b.apply_force_at_point(Vec3::Y, Vec3::new(0.5, 0.0, 0.0));
         b.integrate_velocity(Vec3::ZERO, 0.1);
         assert!(b.angular_velocity.z > 0.0);
+    }
+}
+
+#[cfg(test)]
+mod surface_tests {
+    use super::*;
+
+    const EVERYWHERE: (Vec3, Vec3) = (Vec3::splat(-1e6), Vec3::splat(1e6));
+
+    #[test]
+    fn box_surface_points_are_on_the_surface_and_unique() {
+        let b = RigidBody::new(Shape::cuboid(1.0, 0.5, 0.3), Vec3::new(1.0, 2.0, 3.0))
+            .with_orientation(Quat::from_rotation_y(0.7));
+        let mut pts = Vec::new();
+        b.sample_surface(0.05, 0.0, EVERYWHERE, &mut pts);
+        // Area 2(1·0.5 + 1·0.3 + 0.5·0.3) = 1.9 m² at 0.05 m spacing ≈ 760.
+        assert!((700..900).contains(&pts.len()), "{} points", pts.len());
+        for p in &pts {
+            let (s, _, _) = b.closest_surface_point(*p);
+            assert!((s - *p).length() < 1e-4);
+        }
+        for (i, a) in pts.iter().enumerate() {
+            assert!(pts[i + 1..].iter().all(|b| (*a - *b).length() > 1e-4));
+        }
+    }
+
+    #[test]
+    fn sampling_is_clipped_to_the_region() {
+        let floor =
+            RigidBody::new_static(Shape::cuboid(20.0, 0.5, 20.0), Vec3::new(0.0, -0.25, 0.0));
+        let mut pts = Vec::new();
+        floor.sample_surface(
+            0.05,
+            0.0,
+            (Vec3::new(-0.5, -0.1, -0.5), Vec3::new(0.5, 1.0, 0.5)),
+            &mut pts,
+        );
+        // Just the 1 m × 1 m patch of the top face: about 21 × 21 points.
+        assert!((400..600).contains(&pts.len()), "{} points", pts.len());
+    }
+
+    #[test]
+    fn sphere_samples_cover_it_evenly() {
+        let s = RigidBody::new(Shape::Sphere { radius: 0.5 }, Vec3::ZERO);
+        let mut pts = Vec::new();
+        s.sample_surface(0.05, 0.0, EVERYWHERE, &mut pts);
+        // 4π·0.25 / 0.0025 = 1257
+        assert_eq!(pts.len(), 1257);
+        assert!(pts.iter().all(|p| (p.length() - 0.5).abs() < 1e-5));
+        assert!(pts.iter().map(|p| p.y).sum::<f32>().abs() < 0.5);
+    }
+
+    #[test]
+    fn closest_point_inside_box_exits_nearest_face() {
+        let b = RigidBody::new(Shape::cube(1.0), Vec3::ZERO);
+        let (s, n, inside) = b.closest_surface_point(Vec3::new(0.1, 0.45, 0.0));
+        assert!(inside);
+        assert_eq!(n, Vec3::Y);
+        assert!((s - Vec3::new(0.1, 0.5, 0.0)).length() < 1e-6);
     }
 }
