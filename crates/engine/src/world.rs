@@ -3,7 +3,7 @@
 use crate::body::{BodyHandle, BodyId, RigidBody};
 use crate::broad_phase;
 use crate::collision::{self, Manifold};
-use crate::fluid::Fluid;
+use crate::fluid::{CpuSolver, Fluid, FluidSolver};
 use crate::solver::{self, SolverSettings};
 use glam::Vec2;
 use serde::{Deserialize, Serialize};
@@ -194,6 +194,12 @@ impl World {
     /// 6. **Integrate positions** with the corrected velocities, plus the
     ///    position correction.
     pub fn step(&mut self, dt: f32) {
+        self.step_with(dt, &mut CpuSolver);
+    }
+
+    /// [`World::step`] with a chosen fluid solver (for example the GPU one
+    /// from the `gpu` crate).
+    pub fn step_with(&mut self, dt: f32, fluid_solver: &mut dyn FluidSolver) {
         assert!(
             dt > 0.0 && dt.is_finite(),
             "time step must be positive, got {dt}"
@@ -202,9 +208,13 @@ impl World {
         if !self.fluid.is_empty() {
             let p = self.fluid.params;
             let boundary = p.boundary(&self.bodies);
-            let impulses = self
-                .fluid
-                .step(&boundary, self.gravity, dt, self.bodies.len());
+            let impulses = fluid_solver.step(
+                &mut self.fluid,
+                &boundary,
+                self.gravity,
+                dt,
+                self.bodies.len(),
+            );
             self.fluid.project_out_of_bodies(&self.bodies);
             self.fluid.remove_escaped();
 

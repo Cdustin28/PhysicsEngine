@@ -17,12 +17,16 @@ engine = { path = "../engine" }
 eframe = { version = "0.37", features = ["persistence"] }
 glam.workspace = true
 serde.workspace = true
+bytemuck = { version = "1", features = ["derive"] }
 # File dialogs: native OS dialogs on desktop, the browser's picker on the web.
 rfd = "0.17"
 
-# Desktop: multithreaded fluid.
+# Desktop: multithreaded fluid, and the GPU fluid solver. (The GPU solver
+# needs to wait for results, which browsers don't allow, so the web build
+# leaves it out for now.)
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 engine = { path = "../engine", features = ["parallel"] }
+gpu = { path = "../gpu" }
 
 # Web-only: async entry point for the browser build.
 [target.'cfg(target_arch = "wasm32")'.dependencies]

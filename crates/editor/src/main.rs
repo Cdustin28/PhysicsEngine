@@ -4,6 +4,7 @@
 mod app;
 mod camera;
 mod history;
+mod particles;
 
 use app::EditorApp;
 

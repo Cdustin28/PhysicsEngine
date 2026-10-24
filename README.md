@@ -4,7 +4,7 @@ A 2D rigid-body and particle-fluid physics engine with an interactive editor, wr
 
 Website: [physicsengine.dev](https://physicsengine.dev) · Simulator in your browser: [physicsengine.dev/sim](https://physicsengine.dev/sim/) · Plan: [ROADMAP.md](ROADMAP.md)
 
-> **Status:** milestone M4. Rigid boxes and circles collide, stack, bounce, and slide with friction. SPH water flows around them, and bodies float, sink, and get pushed by it. The editor has undo, multi-select, snapping, and runs in the browser. GPU acceleration (M5) is next.
+> **Status:** milestone M5. Rigid boxes and circles collide, stack, bounce, and slide with friction. SPH water flows around them, and bodies float, sink, and get pushed by it, on the CPU or (desktop) the GPU. The editor has undo, multi-select, snapping, and runs in the browser. 3D (M6) is next.
 
 ## Running it
 
@@ -60,11 +60,13 @@ Scenes save as human-readable JSON. **Open…/Save…** use file dialogs on desk
 ```
 crates/
   engine/   physics only: shapes, bodies, collision, contact solver, SPH fluid, scenes. No GUI deps.
+    benches/           Criterion benchmarks
     tests/physics.rs   rigid-body validation against known answers
     tests/fluid.rs     fluid validation (hydrostatics, dam break, leaks)
     tests/coupling.rs  fluid ↔ body validation (Archimedes, momentum exchange)
     examples/          make_scenes (regenerate scenes/), bench_fluid (performance)
-  editor/   eframe/egui app: canvas, tools, inspector. Builds native and wasm.
+  gpu/      the SPH solver as wgpu compute shaders (sph.wgsl); tests check it agrees with the CPU
+  editor/   eframe/egui app: canvas, tools, inspector, GPU particle renderer. Builds native and wasm.
 scenes/     example scene files
 index.html  physicsengine.dev landing page
 .github/workflows/
@@ -74,10 +76,12 @@ index.html  physicsengine.dev landing page
 
 Units are SI throughout: meters, kilograms, seconds, radians. 2D density is kg/m². Water is 10 kg/m² (1000 kg/m³ × 1 cm), the same scale as body densities: a body of density 5 floats half-submerged, and anything above 10 sinks.
 
-The desktop build runs the fluid on all CPU cores (the engine's `parallel` feature); the web build is single-threaded. To measure fluid performance on your machine:
+The desktop build runs the fluid on all CPU cores (the engine's `parallel` feature), or on the GPU with **Fluid panel → Simulate on the GPU**; the web build uses one CPU core. Fluid particles are drawn by the GPU everywhere. To measure performance on your machine:
 
 ```sh
+cargo run --release -p gpu --example bench_gpu --features parallel   # CPU vs GPU at 5k / 20k / 100k particles
 cargo run --release -p engine --example bench_fluid --features parallel
+cargo bench -p engine                                                 # Criterion micro-benchmarks
 ```
 
 The original C++ prototype lives on the [`legacy-cpp`](https://github.com/Cdustin28/PhysicsEngine/tree/legacy-cpp) branch.
