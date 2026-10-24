@@ -23,7 +23,7 @@
           "type": "circle",
           "radius": 0.2
         },
-        "position": [-2.9393501, 3.9393501],
+        "position": [-2.9393399, 3.9393399],
         "angle": 0.0,
         "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
@@ -240,8 +240,8 @@
     "joints": [
       {
         "type": "distance",
-        "min_length": 1.4999855,
-        "max_length": 1.4999855,
+        "min_length": 1.4999999,
+        "max_length": 1.4999999,
         "a": 1,
         "b": null,
         "local_anchor_a": [0.0, 0.0],

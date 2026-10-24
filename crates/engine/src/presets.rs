@@ -158,7 +158,12 @@ pub fn pendulums() -> World {
     let mut w = with_floor();
     // Simple pendulum: 1.5 m rod, released 45° out.
     let pivot = Vec2::new(-4.0, 5.0);
-    let bob = pivot + Vec2::new(1.5 * 0.7071, -1.5 * 0.7071);
+    let bob = pivot
+        + 1.5
+            * Vec2::new(
+                std::f32::consts::FRAC_1_SQRT_2,
+                -std::f32::consts::FRAC_1_SQRT_2,
+            );
     let a = w
         .add_body(RigidBody::new(Shape::Circle { radius: 0.2 }, bob))
         .0;
