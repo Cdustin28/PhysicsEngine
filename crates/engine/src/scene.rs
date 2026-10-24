@@ -60,7 +60,8 @@ pub struct Scene {
 
 impl Scene {
     pub const FORMAT: &'static str = "physicsengine-scene";
-    pub const VERSION: u32 = 2;
+    /// 2 added `fluid`, 3 added `joints`. Older files load unchanged.
+    pub const VERSION: u32 = 3;
     /// Oldest version this build can read.
     pub const OLDEST_SUPPORTED: u32 = 1;
 
@@ -102,6 +103,11 @@ impl Scene {
                 .map_err(|e| SceneError::Invalid(format!("body {i}: {e}")))?;
         }
         scene.world.fluid.validate().map_err(SceneError::Invalid)?;
+        for (i, joint) in scene.world.joints.iter().enumerate() {
+            joint
+                .validate(scene.world.bodies.len())
+                .map_err(|e| SceneError::Invalid(format!("joint {i}: {e}")))?;
+        }
         scene.world.fluid.fill_missing_velocities();
         Ok(scene)
     }

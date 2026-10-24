@@ -1,6 +1,6 @@
 {
   "format": "physicsengine-scene",
-  "version": 2,
+  "version": 3,
   "world": {
     "gravity": [0.0, -9.80665],
     "bodies": [
@@ -94,7 +94,8 @@
       "baumgarte": 0.2,
       "allowed_penetration": 0.005,
       "restitution_threshold": 1.0,
-      "warm_starting": true
+      "warm_starting": true,
+      "substeps": 1
     }
   }
 }

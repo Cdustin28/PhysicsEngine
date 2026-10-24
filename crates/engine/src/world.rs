@@ -4,10 +4,11 @@ use crate::body::{BodyHandle, BodyId, RigidBody};
 use crate::broad_phase;
 use crate::collision::{self, Manifold};
 use crate::fluid::{CpuSolver, Fluid, FluidSolver};
+use crate::joint::Joint;
 use crate::solver::{self, SolverSettings};
 use glam::Vec2;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Everything that is simulated.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,6 +23,10 @@ pub struct World {
     /// it get the defaults.
     #[serde(default)]
     pub solver: SolverSettings,
+    /// Joints between bodies (see [`crate::joint`]). Left out of scene files
+    /// when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub joints: Vec<Joint>,
     /// Simulated time elapsed, s. Not saved in scene files.
     #[serde(skip)]
     pub time: f64,
@@ -47,6 +52,7 @@ impl PartialEq for World {
             && self.bodies == other.bodies
             && self.fluid == other.fluid
             && self.solver == other.solver
+            && self.joints == other.joints
     }
 }
 
@@ -64,6 +70,7 @@ impl World {
             bodies: Vec::new(),
             fluid: Fluid::default(),
             solver: SolverSettings::default(),
+            joints: Vec::new(),
             time: 0.0,
             contacts: Vec::new(),
             fluid_forces: Vec::new(),
@@ -121,7 +128,23 @@ impl World {
         // Cached contacts refer to bodies by index, so they're now wrong.
         self.contacts.clear();
         self.fluid_forces.clear();
+        // Joints on the removed body go with it; the rest are renumbered.
+        self.joints.retain_mut(|j| j.reindex_after_removal(id.0));
         Some(self.bodies.remove(id.0))
+    }
+
+    /// Add a joint, checking it refers to existing bodies. Returns its index.
+    pub fn add_joint(&mut self, joint: Joint) -> Result<usize, String> {
+        joint.validate(self.bodies.len())?;
+        self.joints.push(joint);
+        Ok(self.joints.len() - 1)
+    }
+
+    /// Remove every joint attached to body `id`. Returns how many.
+    pub fn remove_joints_of(&mut self, id: BodyId) -> usize {
+        let before = self.joints.len();
+        self.joints.retain(|j| !j.involves(id.0));
+        before - self.joints.len()
     }
 
     pub fn body(&self, id: BodyId) -> Option<&RigidBody> {
@@ -219,20 +242,42 @@ impl World {
             self.fluid.remove_escaped();
 
             self.fluid_forces.clear();
-            for (body, impulse) in self.bodies.iter_mut().zip(&impulses) {
-                let (force, torque) = (impulse.linear / dt, impulse.angular / dt);
-                if !body.is_static {
-                    body.apply_force(force);
-                    body.apply_torque(torque);
-                }
-                self.fluid_forces.push((force, torque));
+            for impulse in &impulses {
+                self.fluid_forces
+                    .push((impulse.linear / dt, impulse.angular / dt));
             }
         } else {
             self.fluid_forces.clear();
         }
 
+        let substeps = self.solver.substeps.clamp(1, 64);
+        let h = dt / substeps as f32;
+        for _ in 0..substeps {
+            // The fluid's push acts throughout the step, so every substep
+            // gets it (forces are consumed by each velocity update).
+            for (body, &(force, torque)) in self.bodies.iter_mut().zip(&self.fluid_forces) {
+                if !body.is_static {
+                    body.apply_force(force);
+                    body.apply_torque(torque);
+                }
+            }
+            self.rigid_substep(h);
+        }
+        self.time += f64::from(dt);
+    }
+
+    /// Collision, contact and joint solve, and integration over `dt`.
+    fn rigid_substep(&mut self, dt: f32) {
+        // Bodies joined to each other don't collide: chain links overlap at
+        // their pins, and a hinge's two halves touch at the hinge.
+        let jointed: HashSet<(usize, usize)> = self
+            .joints
+            .iter()
+            .filter_map(|j| j.b.map(|b| (j.a.min(b), j.a.max(b))))
+            .collect();
         let mut contacts: Vec<Manifold> = broad_phase::sweep_and_prune_pairs(&self.bodies)
             .into_iter()
+            .filter(|&(i, j)| !jointed.contains(&(i.min(j), i.max(j))))
             .filter_map(|(i, j)| collision::collide(i, &self.bodies[i], j, &self.bodies[j]))
             .collect();
         if self.solver.warm_starting {
@@ -244,7 +289,13 @@ impl World {
             body.integrate_velocity(gravity, dt);
         }
 
-        let correction = solver::solve(&mut self.bodies, &mut contacts, &self.solver, dt);
+        let correction = solver::solve(
+            &mut self.bodies,
+            &mut contacts,
+            &mut self.joints,
+            &self.solver,
+            dt,
+        );
 
         for (i, body) in self.bodies.iter_mut().enumerate() {
             body.integrate_position(dt);
@@ -256,7 +307,6 @@ impl World {
         }
 
         self.contacts = contacts;
-        self.time += f64::from(dt);
     }
 }
 
