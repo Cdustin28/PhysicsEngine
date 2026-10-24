@@ -264,13 +264,31 @@ These apply to every milestone.
 - [ ] Soft bodies in water (coupling with SPH)
 - [ ] Tearing cloth; self-collision within one body
 
-## M9: Smoke, dye, and heat
+## M9: Smoke, dye, and heat ✅
 
-- [ ] Grid-based (Eulerian) fluid: semi-Lagrangian advection, pressure projection (stable fluids, Stam 1999)
-- [ ] Dye and smoke density carried by the flow; obstacles from rigid bodies
-- [ ] Heat: temperature carried by the flow, diffusion (Fourier's law), and buoyancy (Boussinesq): hot air rises
-- [ ] Editor: emitters, heaters, viewing modes; tests (diffusion against the analytic solution, divergence-free flow, energy)
-- [ ] 2D, then 3D
+**Goal:** air you can see: smoke and dye carried by the flow, and heat that rises, in 2D and 3D.
+
+- [x] Grid (Eulerian) gas on a staggered MAC grid: semi-Lagrangian advection with a midpoint backtrace (Stam 1999), pressure projection by conjugate gradients with a MIC(0) preconditioner (137 → 23 iterations on a 48,000-cell grid)
+- [x] Heat: carried by the flow, diffused implicitly (Fourier's law; insulated walls and obstacles), and driving buoyancy by the Boussinesq approximation a = −g (β ΔT − α s) with β = 1/T_ambient (an ideal gas)
+- [x] Smoke/dye concentration with optional weight and fading; Newton cooling; open or closed top
+- [x] Rigid bodies are moving obstacles (cells inside them are solid and move with them)
+- [x] Emitters (heaters and smoke sources, optionally blowing); the world steps the gas at its own rate (30 Hz by default); multithreaded on desktop
+- [x] Editor: smoke grid panel, Smoke tool (K) with brush and emitters, Smoke and Temperature views. 2D draws the grid as a texture; 3D draws soft splats with multiplicative blending (order-independent, so no sorting, and it darkens like absorption)
+- [x] Presets: Smoke plume and Convection (2D), Smoke plume (3D). Scene format v5 adds `gas`.
+- [x] `tests/gas.rs` (2D) and `tests/gas3d.rs` (3D):
+
+  | Test | Expected | Measured |
+  | --- | --- | --- |
+  | Gaussian hot spot spreading (κ = 0.01 m²/s), 2D, 1 s | peak ΔT₀ σ₀²/(σ₀² + 2κt) = 6.667 K | 6.696 K |
+  | Same, 3D, 0.5 s | peak ΔT₀ (σ₀²/σ²)^{3/2} = 7.155 K | 7.191 K |
+  | Heat in a sealed, insulated box | conserved | to 1e-6 (2D), 8e-6 (3D) |
+  | Warm cylinder (2D) starts rising | ½ g β ΔT (added mass = its own) | 0.488 × g β ΔT |
+  | Warm sphere (3D) starts rising | ⅔ g β ΔT (added mass = half its own) | 0.658 × g β ΔT |
+  | Uniformly warm sealed box | stays still (hydrostatic balance) | < 1e-4 m/s |
+  | Plume around an obstacle | rises, never enters the obstacle, divergence-free | ✓ |
+
+- [ ] Gas pushing bodies (pressure forces on obstacles), and smoke interacting with SPH water and soft bodies
+- [ ] Faster 3D: cheaper face-velocity sampling in advection, multigrid pressure solve, GPU compute
 
 ## M10: Validation page
 

@@ -39,6 +39,9 @@ pub struct World {
     /// scene files when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gas: Option<Gas>,
+    /// Time since the gas was last stepped, s (it steps at its own rate).
+    #[serde(skip)]
+    gas_clock: f32,
     /// Simulated time elapsed, s. Not saved in scene files.
     #[serde(skip)]
     pub time: f64,
@@ -89,6 +92,7 @@ impl World {
             soft_bodies: Vec::new(),
             soft: SoftSettings::default(),
             gas: None,
+            gas_clock: 0.0,
             time: 0.0,
             contacts: Vec::new(),
             fluid_forces: Vec::new(),
@@ -297,7 +301,11 @@ impl World {
         );
         // The air moves around the bodies where they ended up.
         if let Some(gas) = self.gas.as_mut() {
-            gas.step(&self.bodies, self.gravity, dt);
+            self.gas_clock += dt;
+            if self.gas_clock >= 1.0 / gas.params.step_hz.max(1.0) - 1e-6 {
+                gas.step(&self.bodies, self.gravity, self.gas_clock);
+                self.gas_clock = 0.0;
+            }
         }
         self.time += f64::from(dt);
     }

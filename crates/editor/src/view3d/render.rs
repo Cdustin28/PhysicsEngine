@@ -58,13 +58,81 @@ struct Globals {
     view_proj: [[f32; 4]; 4],
     eye: [f32; 4],
     light: [f32; 4],
+    /// Camera right and up directions, for camera-facing smoke splats.
+    right: [f32; 4],
+    up: [f32; 4],
 }
+
+/// One soft, camera-facing smoke/heat splat.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+pub struct SplatInstance {
+    pub position: [f32; 3],
+    /// Radius, m.
+    pub size: f32,
+    /// Tint (rgb) and strength (a): the splat multiplies what's behind it
+    /// by mix(white, tint, a × falloff).
+    pub color: [u8; 4],
+}
+
+/// Smoke and heat drawn as overlapping soft splats with *multiplicative*
+/// blending: each one scales the color behind it toward its tint. A product
+/// doesn't depend on order, so thousands of splats need no sorting, and it
+/// behaves like light absorption (smoke darkens what's behind it).
+const SPLAT_SHADER: &str = r"
+struct Globals {
+    view_proj: mat4x4<f32>,
+    eye: vec4<f32>,
+    light: vec4<f32>,
+    right: vec4<f32>,
+    up: vec4<f32>,
+};
+@group(0) @binding(0) var<uniform> g: Globals;
+
+struct VertexOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) corner: vec2<f32>,
+    @location(1) color: vec4<f32>,
+};
+
+@vertex
+fn vs_main(
+    @builtin(vertex_index) vertex: u32,
+    @location(0) center: vec3<f32>,
+    @location(1) size: f32,
+    @location(2) color: vec4<f32>,
+) -> VertexOut {
+    var corners = array<vec2<f32>, 6>(
+        vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, -1.0), vec2<f32>(1.0, 1.0),
+        vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, 1.0), vec2<f32>(-1.0, 1.0),
+    );
+    let corner = corners[vertex];
+    let world = center + (g.right.xyz * corner.x + g.up.xyz * corner.y) * size;
+    var out: VertexOut;
+    out.clip = g.view_proj * vec4<f32>(world, 1.0);
+    out.corner = corner;
+    out.color = color;
+    return out;
+}
+
+@fragment
+fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
+    let r2 = dot(in.corner, in.corner);
+    if (r2 > 1.0) {
+        discard;
+    }
+    let falloff = (1.0 - r2) * (1.0 - r2);
+    return vec4<f32>(mix(vec3<f32>(1.0), in.color.rgb, in.color.a * falloff), 1.0);
+}
+";
 
 const SHADER: &str = r"
 struct Globals {
     view_proj: mat4x4<f32>,
     eye: vec4<f32>,
     light: vec4<f32>,
+    right: vec4<f32>,
+    up: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> g: Globals;
 
@@ -154,6 +222,10 @@ struct Mesh {
 
 pub struct BodyRenderer {
     pipeline: wgpu::RenderPipeline,
+    splat_pipeline: wgpu::RenderPipeline,
+    splats: wgpu::Buffer,
+    splat_capacity: usize,
+    splat_count: u32,
     globals: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     cube: Mesh,
@@ -253,6 +325,55 @@ impl BodyRenderer {
             multiview_mask: None,
             cache: None,
         });
+        let splat_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("splats3d"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(SPLAT_SHADER)),
+        });
+        let splat_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("splats3d"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &splat_module,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<SplatInstance>() as u64,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32, 2 => Unorm8x4],
+                })],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &splat_module,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    // result = destination × source (multiplicative).
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::Dst,
+                            dst_factor: wgpu::BlendFactor::Zero,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                        alpha: wgpu::BlendComponent::OVER,
+                    }),
+                    write_mask: wgpu::ColorWrites::COLOR,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            // Bodies in front hide smoke behind them; smoke doesn't hide
+            // anything from the depth test.
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::Less),
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
         let globals = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("bodies3d globals"),
             size: std::mem::size_of::<Globals>() as u64,
@@ -273,6 +394,10 @@ impl BodyRenderer {
         let capacity = 256;
         Self {
             pipeline,
+            splat_pipeline,
+            splats: splat_buffer(device, 1024),
+            splat_capacity: 1024,
+            splat_count: 0,
             globals,
             bind_group,
             cube: Mesh::new(device, &cv, &ci),
@@ -320,6 +445,15 @@ fn soft_buffer(device: &wgpu::Device, bytes: usize, usage: wgpu::BufferUsages) -
         label: Some("soft mesh"),
         size: bytes as u64,
         usage: usage | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    })
+}
+
+fn splat_buffer(device: &wgpu::Device, capacity: usize) -> wgpu::Buffer {
+    device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("splats3d"),
+        size: (capacity * std::mem::size_of::<SplatInstance>()) as u64,
+        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     })
 }
@@ -388,6 +522,15 @@ fn sphere_mesh(segments: u32, rings: u32) -> (Vec<Vertex>, Vec<u32>) {
     (vertices, indices)
 }
 
+/// Where the camera is and which way it faces.
+pub struct CameraView {
+    pub view_proj: Mat4,
+    pub eye: Vec3,
+    /// Unit right and up directions on screen, in world space.
+    pub right: Vec3,
+    pub up: Vec3,
+}
+
 /// One frame's bodies and particles, handed to egui as a paint callback.
 pub struct BodyCallback {
     /// Cubes, then spheres, then particles, then one per soft body.
@@ -396,6 +539,7 @@ pub struct BodyCallback {
     spheres_end: u32,
     particles_end: u32,
     soft: SoftMeshes,
+    splats: Vec<SplatInstance>,
     globals: Globals,
 }
 
@@ -405,9 +549,15 @@ impl BodyCallback {
         spheres: Vec<Instance>,
         particles: Vec<Instance>,
         soft: SoftMeshes,
-        view_proj: Mat4,
-        eye: Vec3,
+        splats: Vec<SplatInstance>,
+        camera: CameraView,
     ) -> Self {
+        let CameraView {
+            view_proj,
+            eye,
+            right,
+            up,
+        } = camera;
         let n = cubes.len() as u32;
         let spheres_end = n + spheres.len() as u32;
         let particles_end = spheres_end + particles.len() as u32;
@@ -421,11 +571,14 @@ impl BodyCallback {
             spheres_end,
             particles_end,
             soft,
+            splats,
             globals: Globals {
                 view_proj: view_proj.to_cols_array_2d(),
                 eye: eye.extend(1.0).to_array(),
                 // Sun from upper front-left.
                 light: [0.45, 0.8, 0.35, 0.0],
+                right: right.extend(0.0).to_array(),
+                up: up.extend(0.0).to_array(),
             },
         }
     }
@@ -475,6 +628,14 @@ impl CallbackTrait for BodyCallback {
             queue.write_buffer(&r.soft_vertices, 0, bytemuck::cast_slice(&soft.vertices));
             queue.write_buffer(&r.soft_indices, 0, bytemuck::cast_slice(&soft.indices));
         }
+        if self.splats.len() > r.splat_capacity {
+            r.splat_capacity = self.splats.len().next_power_of_two();
+            r.splats = splat_buffer(device, r.splat_capacity);
+        }
+        if !self.splats.is_empty() {
+            queue.write_buffer(&r.splats, 0, bytemuck::cast_slice(&self.splats));
+        }
+        r.splat_count = self.splats.len() as u32;
         r.soft_draws = soft
             .bodies
             .iter()
@@ -493,7 +654,7 @@ impl CallbackTrait for BodyCallback {
         let Some(r) = resources.get::<BodyRenderer>() else {
             return;
         };
-        if r.total == 0 && r.soft_draws.is_empty() {
+        if r.total == 0 && r.soft_draws.is_empty() && r.splat_count == 0 {
             return;
         }
         pass.set_pipeline(&r.pipeline);
@@ -517,6 +678,13 @@ impl CallbackTrait for BodyCallback {
             for (range, instance) in &r.soft_draws {
                 pass.draw_indexed(range.clone(), 0, *instance..*instance + 1);
             }
+        }
+        // Smoke last, over everything opaque.
+        if r.splat_count > 0 {
+            pass.set_pipeline(&r.splat_pipeline);
+            pass.set_bind_group(0, &r.bind_group, &[]);
+            pass.set_vertex_buffer(0, r.splats.slice(..));
+            pass.draw(0..6, 0..r.splat_count);
         }
     }
 }
@@ -543,6 +711,7 @@ mod tests {
     fn instance_layout_matches_shader() {
         // 3 + 1 + 3 + 1 + 4 floats and 4 bytes of color.
         assert_eq!(std::mem::size_of::<Instance>(), 52);
-        assert_eq!(std::mem::size_of::<Globals>(), 96);
+        assert_eq!(std::mem::size_of::<Globals>(), 128);
+        assert_eq!(std::mem::size_of::<SplatInstance>(), 20);
     }
 }

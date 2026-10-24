@@ -1,0 +1,101 @@
+{
+  "format": "physicsengine-scene-3d",
+  "version": 5,
+  "world": {
+    "gravity": [0.0, -9.80665, 0.0],
+    "bodies": [
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [10.0, 0.25, 10.0]
+        },
+        "position": [0.0, -0.25, 0.0],
+        "orientation": [0.0, 0.0, 0.0, 1.0],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": true
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.8, 0.05, 0.6]
+        },
+        "position": [-0.2, 2.6, 0.0],
+        "orientation": [0.0, 0.0, 0.09983342, 0.9950042],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": true
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.3, 0.3, 0.3]
+        },
+        "position": [1.0, 0.3, 0.2],
+        "orientation": [0.0, 0.0, 0.0, 1.0],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.3, 0.3, 0.3]
+        },
+        "position": [1.0, 0.9, 0.2],
+        "orientation": [0.0, 0.0, 0.0, 1.0],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      }
+    ],
+    "solver": {
+      "velocity_iterations": 12,
+      "baumgarte": 0.2,
+      "allowed_penetration": 0.005,
+      "restitution_threshold": 1.0,
+      "warm_starting": true,
+      "substeps": 1
+    },
+    "soft": {
+      "substeps": 20
+    },
+    "gas": {
+      "origin": [-2.0, 0.0, -1.5],
+      "cell": 0.1,
+      "nx": 40,
+      "ny": 40,
+      "nz": 30,
+      "params": {
+        "ambient_temperature": 293.15,
+        "thermal_diffusivity": 0.000022,
+        "smoke_weight": 0.0,
+        "smoke_decay": 0.05,
+        "cooling": 0.0,
+        "open_top": true,
+        "step_hz": 30.0
+      },
+      "emitters": [
+        {
+          "center": [-0.6, 0.25, 0.0],
+          "radius": 0.25,
+          "smoke_rate": 1.5,
+          "temperature": 373.15,
+          "velocity": [0.0, 0.0, 0.0]
+        }
+      ]
+    }
+  }
+}

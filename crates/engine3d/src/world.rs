@@ -4,6 +4,7 @@ use crate::body::{BodyHandle, BodyId, RigidBody};
 use crate::broad_phase;
 use crate::collision::{self, Manifold};
 use crate::fluid::{CpuSolver, Fluid, FluidSolver};
+use crate::gas::Gas;
 use crate::joint::Joint;
 use crate::soft::{self, SoftBody, SoftSettings};
 use crate::solver::{self, SolverSettings};
@@ -32,6 +33,12 @@ pub struct World {
     pub soft_bodies: Vec<SoftBody>,
     #[serde(default)]
     pub soft: SoftSettings,
+    /// Smoke, dye, and heat on a grid. Left out of scene files when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gas: Option<Gas>,
+    /// Time since the gas was last stepped, s (it steps at its own rate).
+    #[serde(skip)]
+    gas_clock: f32,
     /// SPH water. Left out of scene files when unused.
     #[serde(default, skip_serializing_if = "Fluid::is_unused")]
     pub fluid: Fluid,
@@ -57,6 +64,7 @@ impl PartialEq for World {
             && self.joints == other.joints
             && self.soft_bodies == other.soft_bodies
             && self.soft == other.soft
+            && self.gas == other.gas
     }
 }
 
@@ -76,6 +84,8 @@ impl World {
             joints: Vec::new(),
             soft_bodies: Vec::new(),
             soft: SoftSettings::default(),
+            gas: None,
+            gas_clock: 0.0,
             fluid: Fluid::default(),
             fluid_forces: Vec::new(),
             time: 0.0,
@@ -240,6 +250,13 @@ impl World {
             dt,
             &self.soft,
         );
+        if let Some(gas) = self.gas.as_mut() {
+            self.gas_clock += dt;
+            if self.gas_clock >= 1.0 / gas.params.step_hz.max(1.0) - 1e-6 {
+                gas.step(&self.bodies, self.gravity, self.gas_clock);
+                self.gas_clock = 0.0;
+            }
+        }
         self.time += f64::from(dt);
     }
 

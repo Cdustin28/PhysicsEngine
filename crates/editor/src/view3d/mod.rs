@@ -6,6 +6,7 @@
 //! - `orbit.rs`: the orbit camera, picking rays
 //! - `render.rs`: GPU drawing of bodies
 
+mod gas;
 mod joints;
 mod orbit;
 pub mod render;
@@ -37,6 +38,8 @@ enum Tool {
     Chain,
     /// Place a soft ball, cloth, or jelly cube.
     Soft,
+    /// Smoke and heat: brush or emitters.
+    Smoke,
 }
 
 /// Parameters for the next body placed with the Sphere or Box tool.
@@ -67,7 +70,9 @@ impl Default for NewBody {
 impl NewBody {
     fn shape(&self, tool: Tool) -> Option<Shape> {
         match tool {
-            Tool::Select | Tool::Water | Tool::Joint | Tool::Chain | Tool::Soft => None,
+            Tool::Select | Tool::Water | Tool::Joint | Tool::Chain | Tool::Soft | Tool::Smoke => {
+                None
+            }
             Tool::Sphere => Some(Shape::Sphere {
                 radius: self.radius,
             }),
@@ -98,6 +103,7 @@ pub struct Persisted3d {
     use_gpu: bool,
     joint_settings: joints::JointSettings,
     soft_settings: soft::SoftSettings,
+    gas_settings: gas::GasSettings,
     /// The 3D scene as it was when the app closed, as scene JSON.
     scene: Option<String>,
 }
@@ -112,6 +118,7 @@ impl Default for Persisted3d {
             use_gpu: false,
             joint_settings: joints::JointSettings::default(),
             soft_settings: soft::SoftSettings::default(),
+            gas_settings: gas::GasSettings::default(),
             scene: None,
         }
     }
@@ -138,6 +145,7 @@ pub struct Editor3d {
     selected_soft: Option<usize>,
     /// Soft body being dragged: index, drag plane height, last point.
     soft_grab: Option<(usize, f32, Vec3)>,
+    gas_settings: gas::GasSettings,
     pub status: String,
     /// Whether the GPU body renderer is available.
     gpu_render: bool,
@@ -179,6 +187,7 @@ impl Editor3d {
             soft_settings: p.soft_settings.clone(),
             selected_soft: None,
             soft_grab: None,
+            gas_settings: p.gas_settings.clone(),
             status,
             gpu_render,
             #[cfg(not(target_arch = "wasm32"))]
@@ -198,6 +207,7 @@ impl Editor3d {
             use_gpu: self.use_gpu,
             joint_settings: self.joint_settings.clone(),
             soft_settings: self.soft_settings.clone(),
+            gas_settings: self.gas_settings.clone(),
             scene: Some(self.scene_json()),
         }
     }
@@ -489,6 +499,9 @@ impl Editor3d {
         }
         if pressed(Key::S) {
             self.tool = Tool::Soft;
+        }
+        if pressed(Key::K) {
+            self.tool = Tool::Smoke;
         }
         if pressed(Key::F) {
             self.focus_selected();

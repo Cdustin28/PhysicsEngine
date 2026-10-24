@@ -1,6 +1,6 @@
 //! 3D toolbar, sidebar, status bar, and viewport.
 
-use super::render::{BodyCallback, Instance};
+use super::render::{BodyCallback, CameraView, Instance};
 use super::{Editor3d, Grab, MAX_THROW_SPEED, Tool, ray_plane};
 use eframe::egui::{self, Color32, PointerButton, Pos2, Rect, Sense, Ui};
 use engine3d::{BodyId, RigidBody, Shape, Vec3, presets};
@@ -105,6 +105,7 @@ impl Editor3d {
                 ui.selectable_value(&mut self.tool, Tool::Joint, "Joint (J)");
                 ui.selectable_value(&mut self.tool, Tool::Chain, "Chain (L)");
                 ui.selectable_value(&mut self.tool, Tool::Soft, "Soft (S)");
+                ui.selectable_value(&mut self.tool, Tool::Smoke, "Smoke (K)");
             });
             self.tool_options(ui);
 
@@ -113,6 +114,9 @@ impl Editor3d {
 
             ui.separator();
             self.fluid_panel(ui);
+
+            ui.separator();
+            self.gas_panel(ui);
 
             ui.separator();
             ui.heading("Selection");
@@ -168,6 +172,7 @@ impl Editor3d {
             }
             Tool::Joint => self.joint_tool_options(ui),
             Tool::Soft => self.soft_tool_options(ui),
+            Tool::Smoke => self.smoke_tool_options(ui),
             Tool::Chain => self.chain_tool_options(ui),
             Tool::Water => {
                 egui::Grid::new("new_water3d")
@@ -407,6 +412,7 @@ impl Editor3d {
                     self.place_soft(rect, p);
                 }
             }
+            Tool::Smoke => self.smoke_tool_input(&response, rect),
         }
 
         // --- Drawing.
@@ -423,6 +429,7 @@ impl Editor3d {
             );
         }
         self.draw_joints(&painter, rect);
+        self.draw_gas_overlay(&painter, rect);
         if self.show_contacts {
             self.draw_contacts(&painter, rect);
         }
@@ -617,6 +624,9 @@ impl Editor3d {
     }
 
     fn body_callback(&self, rect: Rect) -> BodyCallback {
+        let forward = (self.camera.target - self.camera.eye()).normalize();
+        let right = forward.cross(Vec3::Y).normalize_or(Vec3::X);
+        let up = right.cross(forward);
         let selected = self.selected();
         let (mut cubes, mut spheres) = (Vec::new(), Vec::new());
         for (i, b) in self.world.bodies.iter().enumerate() {
@@ -668,8 +678,13 @@ impl Editor3d {
             spheres,
             particles,
             self.soft_meshes(),
-            self.camera.view_proj(rect),
-            self.camera.eye(),
+            self.gas_splats(),
+            CameraView {
+                view_proj: self.camera.view_proj(rect),
+                eye: self.camera.eye(),
+                right,
+                up,
+            },
         )
     }
 

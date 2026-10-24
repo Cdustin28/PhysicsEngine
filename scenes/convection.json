@@ -26,7 +26,8 @@
         "smoke_weight": 0.0,
         "smoke_decay": 0.0,
         "cooling": 0.05,
-        "open_top": false
+        "open_top": false,
+        "step_hz": 30.0
       },
       "emitters": [
         {

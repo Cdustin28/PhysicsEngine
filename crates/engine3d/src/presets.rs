@@ -20,6 +20,7 @@ pub const ALL: &[Preset] = &[
     ("newtons_cradle", newtons_cradle),
     ("chain_drape", chain_drape),
     ("soft_bodies", soft_bodies),
+    ("smoke_plume", smoke_plume),
 ];
 
 /// A 20 m × 20 m static floor whose top is at y = 0.
@@ -307,6 +308,30 @@ pub fn soft_bodies() -> World {
         5,
         1000.0,
     ));
+    w
+}
+
+/// A smoky fire beside a stack of crates, under a tilted shelf.
+pub fn smoke_plume() -> World {
+    use crate::gas::{Emitter, Gas};
+    let mut w = with_floor();
+    let mut gas = Gas::new(Vec3::new(-2.0, 0.0, -1.5), 0.1, 40, 40, 30);
+    gas.params.smoke_decay = 0.05;
+    gas.emitters.push(Emitter {
+        center: Vec3::new(-0.6, 0.25, 0.0),
+        radius: 0.25,
+        smoke_rate: 1.5,
+        temperature: 293.15 + 80.0,
+        velocity: Vec3::ZERO,
+    });
+    w.gas = Some(gas);
+    w.add_body(
+        RigidBody::new_static(Shape::cuboid(1.6, 0.1, 1.2), Vec3::new(-0.2, 2.6, 0.0))
+            .with_orientation(Quat::from_rotation_z(0.2)),
+    );
+    for y in [0.3, 0.9] {
+        w.add_body(RigidBody::new(Shape::cube(0.6), Vec3::new(1.0, y, 0.2)));
+    }
     w
 }
 

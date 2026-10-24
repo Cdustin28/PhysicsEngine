@@ -54,6 +54,15 @@ pub struct GasParams {
     pub cooling: f32,
     /// Let air (and smoke) leave through the top of the domain.
     pub open_top: bool,
+    /// How often the world steps the gas, Hz. Smoke doesn't need the rigid
+    /// bodies' 120 Hz, and its solver is stable at large steps, so the
+    /// world steps it less often (with a correspondingly longer step).
+    #[serde(default = "default_gas_hz")]
+    pub step_hz: f32,
+}
+
+fn default_gas_hz() -> f32 {
+    30.0
 }
 
 impl Default for GasParams {
@@ -65,6 +74,7 @@ impl Default for GasParams {
             smoke_decay: 0.0,
             cooling: 0.0,
             open_top: true,
+            step_hz: default_gas_hz(),
         }
     }
 }
@@ -575,10 +585,9 @@ impl Gas {
             })
             .collect();
         let apply = |x: &[f64], out: &mut [f64]| {
-            for k in 0..n {
+            fill(out, |k| {
                 if !fluid[k] {
-                    out[k] = x[k];
-                    continue;
+                    return x[k];
                 }
                 let mut lap = 0.0;
                 for side in sides[k] {
@@ -586,8 +595,8 @@ impl Gas {
                         lap += x[m] - x[k];
                     }
                 }
-                out[k] = x[k] - c * lap;
-            }
+                x[k] - c * lap
+            });
         };
         let diag: Vec<f64> = (0..n)
             .map(|k| {
@@ -602,7 +611,9 @@ impl Gas {
             })
             .collect();
         let mut x: Vec<f64> = b.clone();
-        conjugate_gradient(&apply, &diag, &b, &mut x, DIFFUSION_TOLERANCE);
+        // Diagonally dominant: dividing by the diagonal is enough.
+        let jacobi = |r: &[f64], z: &mut [f64]| fill(z, |k| r[k] / diag[k]);
+        conjugate_gradient(&apply, &jacobi, &b, &mut x, DIFFUSION_TOLERANCE);
         for k in 0..n {
             if fluid[k] {
                 self.heat[k] = x[k] as f32;
@@ -649,10 +660,9 @@ impl Gas {
             }
         }
         let apply = |x: &[f64], out: &mut [f64]| {
-            for k in 0..n {
+            fill(out, |k| {
                 if !fluid[k] {
-                    out[k] = 0.0;
-                    continue;
+                    return 0.0;
                 }
                 let mut sum = 0.0;
                 for side in sides[k] {
@@ -662,8 +672,8 @@ impl Gas {
                         Side::Wall => {}
                     }
                 }
-                out[k] = sum;
-            }
+                sum
+            });
         };
         let diag: Vec<f64> = (0..n)
             .map(|k| {
@@ -685,7 +695,9 @@ impl Gas {
                 }
             })
             .collect();
-        let iterations = conjugate_gradient(&apply, &diag, &b, &mut q, PRESSURE_TOLERANCE);
+        let mic = Mic::new(&sides, &fluid, &diag);
+        let precondition = |r: &[f64], z: &mut [f64]| mic.apply(r, z);
+        let iterations = conjugate_gradient(&apply, &precondition, &b, &mut q, PRESSURE_TOLERANCE);
         // Subtract the gradient on faces between fluid cells (and at the
         // open top, where q = 0 outside).
         for j in 0..ny {
@@ -729,9 +741,136 @@ impl Gas {
 
 /// Jacobi-preconditioned conjugate gradients for a symmetric positive
 /// (semi-)definite operator. Returns the iteration count.
+/// Modified incomplete Cholesky, MIC(0) (Bridson, "Fluid Simulation for
+/// Computer Graphics", §5.3): an approximate factorization L Lᵀ ≈ A of the
+/// pressure matrix with the same sparsity, applied by one forward and one
+/// backward sweep. It cuts the conjugate-gradient iterations about 3–4×
+/// compared with dividing by the diagonal.
+struct Mic {
+    /// 1 / L_cc per cell (0 for solid cells).
+    precon: Vec<f64>,
+    /// Off-diagonal coefficient to the next cell along each axis (−1
+    /// between two fluid cells, else 0), and that cell's index.
+    plus: Vec<[(f64, usize); 2]>,
+}
+
+impl Mic {
+    /// τ: how much of the dropped fill-in to compensate (0.97 is standard);
+    /// σ: safety floor against tiny pivots.
+    const TAU: f64 = 0.97;
+    const SIGMA: f64 = 0.25;
+
+    fn new(sides: &[[Side; 4]], fluid: &[bool], diag: &[f64]) -> Self {
+        let n = fluid.len();
+        let plus: Vec<[(f64, usize); 2]> = (0..n)
+            .map(|c| {
+                [sides[c][1], sides[c][3]].map(|side| match side {
+                    Side::Fluid(m) if fluid[c] => (-1.0, m),
+                    _ => (0.0, c),
+                })
+            })
+            .collect();
+        // Cells before c that link to it, per axis: (coefficient, index).
+        let mut minus: Vec<[(f64, usize); 2]> = vec![[(0.0, 0); 2]; n];
+        for (c, links) in plus.iter().enumerate() {
+            for (d, &(a, m)) in links.iter().enumerate() {
+                if a != 0.0 {
+                    minus[m][d] = (a, c);
+                }
+            }
+        }
+        let mut precon = vec![0.0; n];
+        for c in 0..n {
+            if !fluid[c] {
+                continue;
+            }
+            let mut e = diag[c];
+            for (d, &(a, m)) in minus[c].iter().enumerate() {
+                if a == 0.0 {
+                    continue;
+                }
+                let pm = precon[m];
+                e -= (a * pm).powi(2);
+                // Fill-in compensation: m's links along the other axes.
+                let others: f64 = plus[m]
+                    .iter()
+                    .enumerate()
+                    .filter(|&(dd, _)| dd != d)
+                    .map(|(_, &(b, _))| b)
+                    .sum();
+                e -= Self::TAU * a * others * pm * pm;
+            }
+            if e < Self::SIGMA * diag[c] {
+                e = diag[c];
+            }
+            precon[c] = 1.0 / e.sqrt();
+        }
+        Self { precon, plus }
+    }
+
+    fn apply(&self, r: &[f64], z: &mut [f64]) {
+        let n = r.len();
+        let mut q = vec![0.0; n];
+        // Forward: solve L q = r.
+        for c in 0..n {
+            if self.precon[c] == 0.0 {
+                continue;
+            }
+            q[c] += r[c];
+            q[c] *= self.precon[c];
+            for &(a, m) in &self.plus[c] {
+                if a != 0.0 {
+                    q[m] -= a * self.precon[c] * q[c];
+                }
+            }
+        }
+        // Backward: solve Lᵀ z = q.
+        for c in (0..n).rev() {
+            if self.precon[c] == 0.0 {
+                z[c] = 0.0;
+                continue;
+            }
+            let mut t = q[c];
+            for &(a, m) in &self.plus[c] {
+                if a != 0.0 {
+                    t -= a * self.precon[c] * z[m];
+                }
+            }
+            z[c] = t * self.precon[c];
+        }
+    }
+}
+
+/// Run `f(k)` for every element of `out`, in parallel on desktop.
+fn fill(out: &mut [f64], f: impl Fn(usize) -> f64 + Sync) {
+    #[cfg(feature = "parallel")]
+    {
+        use rayon::prelude::*;
+        out.par_iter_mut().enumerate().for_each(|(k, o)| *o = f(k));
+    }
+    #[cfg(not(feature = "parallel"))]
+    for (k, o) in out.iter_mut().enumerate() {
+        *o = f(k);
+    }
+}
+
+fn dot(a: &[f64], b: &[f64]) -> f64 {
+    #[cfg(feature = "parallel")]
+    {
+        use rayon::prelude::*;
+        a.par_iter().zip(b).map(|(x, y)| x * y).sum()
+    }
+    #[cfg(not(feature = "parallel"))]
+    a.iter().zip(b).map(|(x, y)| x * y).sum()
+}
+
+/// Preconditioned conjugate gradients for a symmetric positive
+/// (semi-)definite operator. `apply(x, out)` writes A·x;
+/// `precondition(r, z)` writes an approximation of A⁻¹·r. Returns the
+/// iteration count.
 fn conjugate_gradient(
-    apply: &dyn Fn(&[f64], &mut [f64]),
-    diag: &[f64],
+    apply: &(dyn Fn(&[f64], &mut [f64]) + Sync),
+    precondition: &dyn Fn(&[f64], &mut [f64]),
     b: &[f64],
     x: &mut [f64],
     tolerance: f64,
@@ -740,22 +879,22 @@ fn conjugate_gradient(
     let mut ax = vec![0.0; n];
     apply(x, &mut ax);
     let mut r: Vec<f64> = (0..n).map(|k| b[k] - ax[k]).collect();
-    let b_norm = b.iter().map(|v| v * v).sum::<f64>().sqrt();
+    let b_norm = dot(b, b).sqrt();
     if b_norm == 0.0 {
         x.iter_mut().for_each(|v| *v = 0.0);
         return 0;
     }
-    let mut z: Vec<f64> = (0..n).map(|k| r[k] / diag[k]).collect();
+    let mut z = vec![0.0; n];
+    precondition(&r, &mut z);
     let mut p = z.clone();
-    let mut rz: f64 = (0..n).map(|k| r[k] * z[k]).sum();
+    let mut rz = dot(&r, &z);
     let mut ap = vec![0.0; n];
     for it in 0..MAX_SOLVER_ITERATIONS {
-        let r_norm = r.iter().map(|v| v * v).sum::<f64>().sqrt();
-        if r_norm <= tolerance * b_norm {
+        if dot(&r, &r).sqrt() <= tolerance * b_norm {
             return it;
         }
         apply(&p, &mut ap);
-        let pap: f64 = (0..n).map(|k| p[k] * ap[k]).sum();
+        let pap = dot(&p, &ap);
         if pap.abs() < 1e-300 {
             return it;
         }
@@ -764,15 +903,13 @@ fn conjugate_gradient(
             x[k] += alpha * p[k];
             r[k] -= alpha * ap[k];
         }
-        for k in 0..n {
-            z[k] = r[k] / diag[k];
-        }
-        let rz_new: f64 = (0..n).map(|k| r[k] * z[k]).sum();
+        precondition(&r, &mut z);
+        let rz_new = dot(&r, &z);
         let beta = rz_new / rz;
         rz = rz_new;
-        for k in 0..n {
-            p[k] = z[k] + beta * p[k];
-        }
+        let p_old = std::mem::take(&mut p);
+        p = vec![0.0; n];
+        fill(&mut p, |k| z[k] + beta * p_old[k]);
     }
     MAX_SOLVER_ITERATIONS
 }
