@@ -20,9 +20,19 @@ pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
-struct Vertex {
-    position: [f32; 3],
-    normal: [f32; 3],
+pub struct Vertex {
+    pub position: [f32; 3],
+    pub normal: [f32; 3],
+}
+
+/// Soft-body surfaces for one frame: world-space vertices and triangles,
+/// plus one instance (color, highlight; identity transform) per body with
+/// its index range.
+#[derive(Default)]
+pub struct SoftMeshes {
+    pub vertices: Vec<Vertex>,
+    pub indices: Vec<u32>,
+    pub bodies: Vec<(std::ops::Range<u32>, Instance)>,
 }
 
 /// Per-body data.
@@ -99,9 +109,13 @@ fn vs_main(
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-    let n = normalize(in.normal);
+    var n = normalize(in.normal);
     let l = normalize(g.light.xyz);
     let v = normalize(g.eye.xyz - in.world);
+    // Two-sided lighting, so cloth seen from below isn't black.
+    if (dot(n, v) < 0.0) {
+        n = -n;
+    }
     var base = in.color.rgb;
     if (in.flags.x > 0.5) {
         let k = floor(in.world.x) + floor(in.world.z);
@@ -145,6 +159,12 @@ pub struct BodyRenderer {
     cube: Mesh,
     sphere: Mesh,
     particle: Mesh,
+    soft_vertices: wgpu::Buffer,
+    soft_indices: wgpu::Buffer,
+    soft_vertex_capacity: usize,
+    soft_index_capacity: usize,
+    /// Index range and instance index of each soft body this frame.
+    soft_draws: Vec<(std::ops::Range<u32>, u32)>,
     instances: wgpu::Buffer,
     capacity: usize,
     /// Instance ranges: cubes, then spheres, then particles.
@@ -258,6 +278,15 @@ impl BodyRenderer {
             cube: Mesh::new(device, &cv, &ci),
             sphere: Mesh::new(device, &sv, &si),
             particle: Mesh::new(device, &pv, &pi),
+            soft_vertices: soft_buffer(
+                device,
+                1024 * std::mem::size_of::<Vertex>(),
+                wgpu::BufferUsages::VERTEX,
+            ),
+            soft_indices: soft_buffer(device, 4096 * 4, wgpu::BufferUsages::INDEX),
+            soft_vertex_capacity: 1024,
+            soft_index_capacity: 4096,
+            soft_draws: Vec::new(),
             instances: instance_buffer(device, capacity),
             capacity,
             cubes: 0,
@@ -284,6 +313,15 @@ impl Mesh {
             index_count: indices.len() as u32,
         }
     }
+}
+
+fn soft_buffer(device: &wgpu::Device, bytes: usize, usage: wgpu::BufferUsages) -> wgpu::Buffer {
+    device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("soft mesh"),
+        size: bytes as u64,
+        usage: usage | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    })
 }
 
 fn instance_buffer(device: &wgpu::Device, capacity: usize) -> wgpu::Buffer {
@@ -352,10 +390,12 @@ fn sphere_mesh(segments: u32, rings: u32) -> (Vec<Vertex>, Vec<u32>) {
 
 /// One frame's bodies and particles, handed to egui as a paint callback.
 pub struct BodyCallback {
-    /// Cubes, then spheres, then particles.
+    /// Cubes, then spheres, then particles, then one per soft body.
     instances: Vec<Instance>,
     cubes: u32,
     spheres_end: u32,
+    particles_end: u32,
+    soft: SoftMeshes,
     globals: Globals,
 }
 
@@ -364,18 +404,23 @@ impl BodyCallback {
         cubes: Vec<Instance>,
         spheres: Vec<Instance>,
         particles: Vec<Instance>,
+        soft: SoftMeshes,
         view_proj: Mat4,
         eye: Vec3,
     ) -> Self {
         let n = cubes.len() as u32;
         let spheres_end = n + spheres.len() as u32;
+        let particles_end = spheres_end + particles.len() as u32;
         let mut instances = cubes;
         instances.extend(spheres);
         instances.extend(particles);
+        instances.extend(soft.bodies.iter().map(|(_, instance)| *instance));
         Self {
             instances,
             cubes: n,
             spheres_end,
+            particles_end,
+            soft,
             globals: Globals {
                 view_proj: view_proj.to_cols_array_2d(),
                 eye: eye.extend(1.0).to_array(),
@@ -410,7 +455,32 @@ impl CallbackTrait for BodyCallback {
         queue.write_buffer(&r.instances, 0, bytemuck::cast_slice(&self.instances));
         r.cubes = self.cubes;
         r.spheres_end = self.spheres_end;
-        r.total = self.instances.len() as u32;
+        r.total = self.particles_end;
+        // Soft-body meshes.
+        let soft = &self.soft;
+        if soft.vertices.len() > r.soft_vertex_capacity {
+            r.soft_vertex_capacity = soft.vertices.len().next_power_of_two();
+            r.soft_vertices = soft_buffer(
+                device,
+                r.soft_vertex_capacity * std::mem::size_of::<Vertex>(),
+                wgpu::BufferUsages::VERTEX,
+            );
+        }
+        if soft.indices.len() > r.soft_index_capacity {
+            r.soft_index_capacity = soft.indices.len().next_power_of_two();
+            r.soft_indices =
+                soft_buffer(device, r.soft_index_capacity * 4, wgpu::BufferUsages::INDEX);
+        }
+        if !soft.indices.is_empty() {
+            queue.write_buffer(&r.soft_vertices, 0, bytemuck::cast_slice(&soft.vertices));
+            queue.write_buffer(&r.soft_indices, 0, bytemuck::cast_slice(&soft.indices));
+        }
+        r.soft_draws = soft
+            .bodies
+            .iter()
+            .enumerate()
+            .map(|(k, (range, _))| (range.clone(), self.particles_end + k as u32))
+            .collect();
         Vec::new()
     }
 
@@ -423,7 +493,7 @@ impl CallbackTrait for BodyCallback {
         let Some(r) = resources.get::<BodyRenderer>() else {
             return;
         };
-        if r.total == 0 {
+        if r.total == 0 && r.soft_draws.is_empty() {
             return;
         }
         pass.set_pipeline(&r.pipeline);
@@ -440,6 +510,13 @@ impl CallbackTrait for BodyCallback {
             pass.set_vertex_buffer(0, mesh.vertices.slice(..));
             pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..mesh.index_count, 0, range);
+        }
+        if !r.soft_draws.is_empty() {
+            pass.set_vertex_buffer(0, r.soft_vertices.slice(..));
+            pass.set_index_buffer(r.soft_indices.slice(..), wgpu::IndexFormat::Uint32);
+            for (range, instance) in &r.soft_draws {
+                pass.draw_indexed(range.clone(), 0, *instance..*instance + 1);
+            }
         }
     }
 }

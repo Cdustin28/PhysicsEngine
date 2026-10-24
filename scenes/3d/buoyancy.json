@@ -1,6 +1,6 @@
 {
   "format": "physicsengine-scene-3d",
-  "version": 3,
+  "version": 4,
   "world": {
     "gravity": [0.0, -9.80665, 0.0],
     "bodies": [
@@ -138,6 +138,9 @@
       "restitution_threshold": 1.0,
       "warm_starting": true,
       "substeps": 1
+    },
+    "soft": {
+      "substeps": 20
     },
     "fluid": {
       "params": {

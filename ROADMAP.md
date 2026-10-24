@@ -239,12 +239,30 @@ These apply to every milestone.
 - [ ] Hinge with an axis in 3D, joint limits and motors
 - [ ] Breakable joints
 
-## M8: Soft bodies
+## M8: Soft bodies ✅
 
-- [ ] Deformable blobs and cloth with XPBD (extended position-based dynamics): distance and volume/area constraints with physical compliance
-- [ ] Collisions with rigid bodies (both ways) and with the ground
-- [ ] Editor tools and presets; tests (stiffness → measured stretch, energy, no tunneling)
-- [ ] 2D, then 3D
+**Goal:** deformable bodies that collide with everything else, in 2D and 3D.
+
+- [x] XPBD (Macklin et al. 2016, "small steps" 2019): edge constraints with physical stiffness (N/m), area (2D) and volume (3D) constraints held like gas pressure, 20 substeps per world step
+- [x] Shapes: blob and jelly block (2D); pressurized ball (icosphere), cloth with stretch/shear/bend springs and pinnable corners, and jelly cube (3D)
+- [x] Two-way collisions with rigid bodies (corrections split by generalized inverse mass, inertia tensor in 3D) with positional friction, and between soft bodies
+- [x] Damping toward each body's rigid motion (Müller et al. 2007), so wobbles die out while momentum and spin are kept; pinned bodies damp toward rest. Area/volume constraints get XPBD constraint damping.
+- [x] The substep loop runs in f64: at 80 substeps, a particle at rest 3 m up moved less than an f32 can resolve, and a blob hung in midair.
+- [x] Editor: Soft tool (S) in 2D (blob, jelly) and 3D (ball, cloth, jelly); select, drag, throw, delete; inspector; 3D surfaces drawn as dynamic meshes
+- [x] Scene format v4 adds `soft_bodies`
+- [x] `tests/soft.rs` (2D) and `tests/soft3d.rs` (3D):
+
+  | Test | Expected | Measured |
+  | --- | --- | --- |
+  | 5 × 0.1 kg hanging on 200 N/m springs | stretch m g n(n+1)/(2k) = 0.0735 m, at any substep count | 0.0733 m (10 substeps), 0.0729 m (40) |
+  | 0.5 kg on a 50 N/m spring | T = 2π√(m/k) = 0.628 s | within 1% |
+  | Blob dropped 3 m (2D) / ball 2.5 m (3D) | keeps its area/volume, no tunneling | within 0.7% / 3.1%; no particle below the floor |
+  | Cloth onto a 0.6 m ball | rests on top, no particle inside | middle at 1.2624 m (ball top + particle radius: 1.2625) |
+  | Jelly into a free crate, no gravity | momentum conserved | relative error 2e-9 (2D), 3e-7 (3D) |
+  | Jelly bouncing | never gains energy | ✓ |
+
+- [ ] Soft bodies in water (coupling with SPH)
+- [ ] Tearing cloth; self-collision within one body
 
 ## M9: Smoke, dye, and heat
 

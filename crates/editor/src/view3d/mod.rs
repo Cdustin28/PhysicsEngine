@@ -9,6 +9,7 @@
 mod joints;
 mod orbit;
 pub mod render;
+mod soft;
 mod ui;
 
 use crate::history::History;
@@ -34,6 +35,8 @@ enum Tool {
     Joint,
     /// Two clicks: a chain between them.
     Chain,
+    /// Place a soft ball, cloth, or jelly cube.
+    Soft,
 }
 
 /// Parameters for the next body placed with the Sphere or Box tool.
@@ -64,7 +67,7 @@ impl Default for NewBody {
 impl NewBody {
     fn shape(&self, tool: Tool) -> Option<Shape> {
         match tool {
-            Tool::Select | Tool::Water | Tool::Joint | Tool::Chain => None,
+            Tool::Select | Tool::Water | Tool::Joint | Tool::Chain | Tool::Soft => None,
             Tool::Sphere => Some(Shape::Sphere {
                 radius: self.radius,
             }),
@@ -94,6 +97,7 @@ pub struct Persisted3d {
     time_scale: f32,
     use_gpu: bool,
     joint_settings: joints::JointSettings,
+    soft_settings: soft::SoftSettings,
     /// The 3D scene as it was when the app closed, as scene JSON.
     scene: Option<String>,
 }
@@ -107,6 +111,7 @@ impl Default for Persisted3d {
             time_scale: 1.0,
             use_gpu: false,
             joint_settings: joints::JointSettings::default(),
+            soft_settings: soft::SoftSettings::default(),
             scene: None,
         }
     }
@@ -129,6 +134,10 @@ pub struct Editor3d {
     joint_settings: joints::JointSettings,
     /// First click of the Joint or Chain tool: body (if any) and point.
     joint_click: Option<(Option<usize>, Vec3)>,
+    soft_settings: soft::SoftSettings,
+    selected_soft: Option<usize>,
+    /// Soft body being dragged: index, drag plane height, last point.
+    soft_grab: Option<(usize, f32, Vec3)>,
     pub status: String,
     /// Whether the GPU body renderer is available.
     gpu_render: bool,
@@ -167,6 +176,9 @@ impl Editor3d {
             show_contacts: p.show_contacts,
             joint_settings: p.joint_settings.clone(),
             joint_click: None,
+            soft_settings: p.soft_settings.clone(),
+            selected_soft: None,
+            soft_grab: None,
             status,
             gpu_render,
             #[cfg(not(target_arch = "wasm32"))]
@@ -185,6 +197,7 @@ impl Editor3d {
             time_scale: self.time_scale,
             use_gpu: self.use_gpu,
             joint_settings: self.joint_settings.clone(),
+            soft_settings: self.soft_settings.clone(),
             scene: Some(self.scene_json()),
         }
     }
@@ -302,6 +315,8 @@ impl Editor3d {
         self.world = world;
         self.snapshot = None;
         self.selection = None;
+        self.selected_soft = None;
+        self.soft_grab = None;
         self.grab = None;
         self.timestep.reset();
     }
@@ -326,6 +341,13 @@ impl Editor3d {
     fn restore(&mut self, world: World) {
         self.world = world;
         self.grab = None;
+        self.soft_grab = None;
+        if self
+            .selected_soft
+            .is_some_and(|i| i >= self.world.soft_bodies.len())
+        {
+            self.selected_soft = None;
+        }
         self.snapshot = None;
         if let Some(h) = self.selection
             && self.world.find(h).is_none()
@@ -336,7 +358,10 @@ impl Editor3d {
 
     /// Record an edit once the user has finished one (end of every frame).
     pub fn record_finished_edit(&mut self, ctx: &egui::Context) {
-        let busy = self.running || self.grab.is_some() || ctx.input(|i| i.pointer.any_down());
+        let busy = self.running
+            || self.grab.is_some()
+            || self.soft_grab.is_some()
+            || ctx.input(|i| i.pointer.any_down());
         if !busy {
             self.history.record(&self.world);
         }
@@ -351,6 +376,9 @@ impl Editor3d {
     }
 
     fn delete_selected(&mut self) {
+        if self.delete_selected_soft() {
+            return;
+        }
         if let Some(id) = self.selected() {
             self.world.remove_body(id);
             self.selection = None;
@@ -374,7 +402,13 @@ impl Editor3d {
                 hi = hi.max(b.position + extent);
             }
         }
-        for &p in &self.world.fluid.positions {
+        for &p in self
+            .world
+            .fluid
+            .positions
+            .iter()
+            .chain(self.world.soft_bodies.iter().flat_map(|s| &s.positions))
+        {
             lo = lo.min(p);
             hi = hi.max(p);
         }
@@ -430,6 +464,7 @@ impl Editor3d {
         if pressed(Key::Escape) {
             self.tool = Tool::Select;
             self.selection = None;
+            self.selected_soft = None;
             self.joint_click = None;
         }
         if pressed(Key::V) {
@@ -451,6 +486,9 @@ impl Editor3d {
         if pressed(Key::L) {
             self.tool = Tool::Chain;
             self.joint_click = None;
+        }
+        if pressed(Key::S) {
+            self.tool = Tool::Soft;
         }
         if pressed(Key::F) {
             self.focus_selected();

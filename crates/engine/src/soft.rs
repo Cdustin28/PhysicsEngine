@@ -435,6 +435,7 @@ pub fn step(
 /// Damp every particle's velocity toward the body's rigid motion (its
 /// center-of-mass velocity plus its overall spin), by a fraction
 /// `damping · h` (Müller et al. 2007, "Position Based Dynamics", §3.5).
+/// Pinned bodies are damped toward rest instead.
 /// This damps every way the body can deform, including wobbles that barely
 /// change any edge's length (damping along edges alone left a blob jiggling
 /// for many seconds), while leaving linear and angular momentum unchanged.
@@ -453,6 +454,15 @@ fn damp_deformation(s: &SoftBody, wk: &mut Work, h: f64) {
         }
     }
     if mass == 0.0 {
+        return;
+    }
+    // A pinned body can't move rigidly, so all its motion is deformation:
+    // damp toward rest (like air drag on hanging cloth or a chain).
+    if wk.w.contains(&0.0) {
+        for k in 0..wk.x.len() {
+            let v = wk.v[k];
+            wk.v[k] = v - factor * v;
+        }
         return;
     }
     x_cm /= mass;

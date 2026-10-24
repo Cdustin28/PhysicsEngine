@@ -19,6 +19,7 @@ pub const ALL: &[Preset] = &[
     ("pendulums", pendulums),
     ("newtons_cradle", newtons_cradle),
     ("chain_drape", chain_drape),
+    ("soft_bodies", soft_bodies),
 ];
 
 /// A 20 m × 20 m static floor whose top is at y = 0.
@@ -277,6 +278,35 @@ pub fn chain_drape() -> World {
         Anchor::Free,
         Anchor::Free,
     );
+    w
+}
+
+/// A cloth falling onto a ball, a bouncy ball, and a jelly cube.
+pub fn soft_bodies() -> World {
+    use crate::soft::SoftBody;
+    let mut w = with_floor();
+    w.add_body(RigidBody::new_static(
+        Shape::Sphere { radius: 0.7 },
+        Vec3::new(-1.5, 0.7, 0.0),
+    ));
+    w.soft_bodies.push(SoftBody::cloth(
+        Vec3::new(-1.5, 2.2, 0.0),
+        2.4,
+        2.4,
+        20,
+        20,
+        0.5,
+    ));
+    let mut ball = SoftBody::ball(Vec3::new(1.2, 2.0, -0.8), 0.45, 2, 200.0);
+    ball.edge_stiffness = 500.0;
+    ball.volume_stiffness = 50_000.0;
+    w.soft_bodies.push(ball);
+    w.soft_bodies.push(SoftBody::jelly(
+        Vec3::new(1.2, 1.0, 1.0),
+        Vec3::splat(0.6),
+        5,
+        1000.0,
+    ));
     w
 }
 
