@@ -121,7 +121,7 @@ fn floating_cubes_sink_to_archimedes_depth() {
         ids.push((w.add_body(b), density));
     }
     run(&mut w, 3.0);
-    let mut drafts = vec![0.0_f32; 2];
+    let mut drafts = [0.0_f32; 2];
     let samples = 120;
     for _ in 0..samples {
         w.step(DT);

@@ -206,6 +206,21 @@ impl Editor3d {
                 ui.end_row();
             }
         });
+        let gpu_name = self.gpu_name().map(str::to_owned);
+        match gpu_name {
+            Some(name) => {
+                ui.checkbox(&mut self.use_gpu, "Simulate on the GPU")
+                    .on_hover_text(format!("Run the water on {name}"));
+            }
+            None => {
+                ui.add_enabled(
+                    false,
+                    egui::Checkbox::new(&mut false, "Simulate on the GPU"),
+                )
+                .on_disabled_hover_text("Needs a GPU with compute shaders (desktop only for now)");
+            }
+        }
+        let fluid = &mut self.world.fluid;
         if ui
             .add_enabled(!fluid.is_empty(), egui::Button::new("Drain all water"))
             .clicked()
@@ -295,9 +310,14 @@ impl Editor3d {
         if !self.world.fluid.is_empty() {
             ui.separator();
             ui.label(format!(
-                "{} particles · {} substeps",
+                "{} particles · {} substeps · {}",
                 self.world.fluid.len(),
-                self.world.fluid.stats.substeps
+                self.world.fluid.stats.substeps,
+                if self.use_gpu && self.gpu_name().is_some() {
+                    "GPU"
+                } else {
+                    "CPU"
+                }
             ));
         }
         ui.separator();

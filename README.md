@@ -1,10 +1,10 @@
 # PhysicsEngine
 
-A rigid-body and particle-fluid physics engine with an interactive editor, written in Rust: 2D with fluids, and 3D rigid bodies. It runs on Windows, macOS, Linux, and in the browser.
+A rigid-body and particle-fluid physics engine with an interactive editor, written in Rust, in 2D and 3D. It runs on Windows, macOS, Linux, and in the browser.
 
 Website: [physicsengine.dev](https://physicsengine.dev) · Simulator in your browser: [physicsengine.dev/sim](https://physicsengine.dev/sim/) · Plan: [ROADMAP.md](ROADMAP.md)
 
-> **Status:** milestone M6a. In 2D, rigid boxes and circles collide, stack, bounce, and slide with friction; SPH water flows around them, and bodies float, sink, and get pushed by it, on the CPU or (desktop) the GPU. In 3D, spheres and boxes collide, stack, roll, and slide. The editor switches between 2D and 3D, has undo, and runs in the browser. 3D fluid (M6b) is next.
+> **Status:** milestone M6 complete. In 2D and 3D, rigid bodies (boxes and circles or spheres) collide, stack, bounce, roll, and slide with friction; SPH water flows around them, and bodies float, sink, and get pushed by it, on the CPU or (desktop) the GPU. The editor switches between 2D and 3D, has undo, and runs in the browser.
 
 ## Running it
 
@@ -61,6 +61,7 @@ Click **3D** at the left of the toolbar. Play/Pause, Step, Reset, Undo/Redo, Exa
 | --- | --- |
 | Select | Left-click a body |
 | Place a sphere / box | C or B (or the sidebar), then click: it lands on whatever is under the mouse, or the ground |
+| Add water | W, then click: drops a block of water (size set in the sidebar) onto whatever is under the mouse |
 | Move | Left-drag a body across the ground plane · Shift+left-drag to raise or lower it · release while playing to throw |
 | Orbit | Right-drag |
 | Pan | Shift+right-drag or middle-drag |
@@ -80,9 +81,10 @@ crates/
     tests/fluid.rs     fluid validation (hydrostatics, dam break, leaks)
     tests/coupling.rs  fluid ↔ body validation (Archimedes, momentum exchange)
     examples/          make_scenes (regenerate scenes/), bench_fluid (performance)
-  engine3d/ 3D rigid bodies: spheres and boxes, SAT contacts, patch friction, ray casts, scenes.
+  engine3d/ 3D: spheres and boxes, SAT contacts, patch friction, SPH water, ray casts, scenes.
     tests/physics3d.rs validation against closed-form answers (sliding, rolling, bouncing, stacking)
-  gpu/      the SPH solver as wgpu compute shaders (sph.wgsl); tests check it agrees with the CPU
+    tests/fluid3d.rs   fluid validation (hydrostatics, leaks, Archimedes, momentum exchange)
+  gpu/      the SPH solvers as wgpu compute shaders (sph.wgsl, sph3d.wgsl); tests check they agree with the CPU
   editor/   eframe/egui app: canvas, tools, inspector, GPU particle renderer, and the 3D view
             (src/view3d: orbit camera, instanced mesh renderer). Builds native and wasm.
 scenes/     example scene files
@@ -92,9 +94,9 @@ index.html  physicsengine.dev landing page
   deploy.yml  publishes physicsengine.dev from main (landing page, /sim/, /scenes/)
 ```
 
-Units are SI throughout: meters, kilograms, seconds, radians. 3D density is kg/m³ (water 1000). 2D density is kg/m². Water is 10 kg/m² (1000 kg/m³ × 1 cm), the same scale as body densities: a body of density 5 floats half-submerged, and anything above 10 sinks.
+Units are SI throughout: meters, kilograms, seconds, radians. 3D density is kg/m³ (water 1000, default body 500, so a default body floats half-submerged). 2D density is kg/m². Water is 10 kg/m² (1000 kg/m³ × 1 cm), the same scale as body densities: a body of density 5 floats half-submerged, and anything above 10 sinks.
 
-The desktop build runs the fluid on all CPU cores (the engine's `parallel` feature), or on the GPU with **Fluid panel → Simulate on the GPU**; the web build uses one CPU core. Fluid particles are drawn by the GPU everywhere. To measure performance on your machine:
+The desktop build runs the fluid on all CPU cores (the engine's `parallel` feature), or on the GPU with **Simulate on the GPU** (in the Fluid panel in 2D, the Water panel in 3D); the web build uses one CPU core. Fluid particles are drawn by the GPU everywhere. To measure performance on your machine:
 
 ```sh
 cargo run --release -p gpu --example bench_gpu --features parallel   # CPU vs GPU at 5k / 20k / 100k particles

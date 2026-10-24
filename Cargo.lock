@@ -1575,6 +1575,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "engine",
+ "engine3d",
  "pollster 0.4.0",
  "wgpu",
 ]

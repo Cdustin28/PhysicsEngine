@@ -87,6 +87,7 @@ pub struct Persisted3d {
     new_body: NewBody,
     show_contacts: bool,
     time_scale: f32,
+    use_gpu: bool,
     /// The 3D scene as it was when the app closed, as scene JSON.
     scene: Option<String>,
 }
@@ -98,6 +99,7 @@ impl Default for Persisted3d {
             new_body: NewBody::default(),
             show_contacts: false,
             time_scale: 1.0,
+            use_gpu: false,
             scene: None,
         }
     }
@@ -120,6 +122,10 @@ pub struct Editor3d {
     pub status: String,
     /// Whether the GPU body renderer is available.
     gpu_render: bool,
+    /// The GPU fluid solver, if this machine can run it (desktop only).
+    #[cfg(not(target_arch = "wasm32"))]
+    gpu_solver: Option<gpu::GpuSolver3d>,
+    use_gpu: bool,
 }
 
 impl Editor3d {
@@ -151,6 +157,9 @@ impl Editor3d {
             show_contacts: p.show_contacts,
             status,
             gpu_render,
+            #[cfg(not(target_arch = "wasm32"))]
+            gpu_solver: None,
+            use_gpu: p.use_gpu,
         };
         editor.history.rebase(&editor.world);
         editor
@@ -162,6 +171,7 @@ impl Editor3d {
             new_body: self.new_body.clone(),
             show_contacts: self.show_contacts,
             time_scale: self.time_scale,
+            use_gpu: self.use_gpu,
             scene: Some(self.scene_json()),
         }
     }
@@ -194,7 +204,7 @@ impl Editor3d {
             let frame_time = ctx.input(|i| i.stable_dt).min(0.1) * self.time_scale;
             let steps = self.timestep.advance(frame_time);
             for _ in 0..steps {
-                self.world.step(self.timestep.dt);
+                self.step_world();
             }
             self.steps_last_frame = steps;
         }
@@ -216,6 +226,33 @@ impl Editor3d {
         self.gpu_render = on;
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn set_gpu_solver(&mut self, solver: Option<gpu::GpuSolver3d>) {
+        self.gpu_solver = solver;
+    }
+
+    /// The GPU's name, if the GPU fluid solver can be used here.
+    fn gpu_name(&self) -> Option<&str> {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(solver) = &self.gpu_solver {
+            return Some(solver.adapter_name());
+        }
+        None
+    }
+
+    /// One fixed step with the chosen fluid solver.
+    fn step_world(&mut self) {
+        let dt = self.timestep.dt;
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.use_gpu
+            && let Some(solver) = self.gpu_solver.as_mut()
+        {
+            self.world.step_with(dt, solver);
+            return;
+        }
+        self.world.step(dt);
+    }
+
     /// Pause (when switching to the 2D editor).
     pub fn pause_public(&mut self) {
         self.pause();
@@ -231,7 +268,7 @@ impl Editor3d {
     fn step_once(&mut self) {
         self.pause();
         self.history.record(&self.world);
-        self.world.step(self.timestep.dt);
+        self.step_world();
         self.history.rebase(&self.world);
     }
 

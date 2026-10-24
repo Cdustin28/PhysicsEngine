@@ -1,5 +1,6 @@
-//! GPU fluid solver: the engine's weakly compressible SPH as wgpu compute
-//! shaders (`sph.wgsl`).
+//! GPU fluid solvers: the engine's weakly compressible SPH as wgpu compute
+//! shaders, in 2D (`sph.wgsl`, [`GpuSolver`]) and 3D (`sph3d.wgsl`,
+//! [`GpuSolver3d`]). The 3D one is the same design; see [`sph3d`].
 //!
 //! [`GpuSolver`] implements [`engine::FluidSolver`], so it drops into
 //! [`engine::World::step_with`] in place of the CPU solver. Each world step
@@ -23,6 +24,10 @@
 //! Reading results back has to block until the GPU finishes, which a
 //! browser can't do, so on the web this solver isn't available yet and the
 //! editor uses the CPU solver.
+
+pub mod sph3d;
+
+pub use sph3d::GpuSolver3d;
 
 use bytemuck::{Pod, Zeroable};
 use engine::fluid::boundary::Boundary;
@@ -123,27 +128,8 @@ impl GpuSolver {
     /// software rasterizer such as lavapipe) is available.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn headless() -> Result<Self, String> {
-        pollster::block_on(async {
-            let instance =
-                wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-            let adapter = instance
-                .request_adapter(&wgpu::RequestAdapterOptions {
-                    power_preference: wgpu::PowerPreference::HighPerformance,
-                    ..Default::default()
-                })
-                .await
-                .map_err(|e| format!("no GPU adapter: {e}"))?;
-            let name = adapter.get_info().name;
-            let (device, queue) = adapter
-                .request_device(&wgpu::DeviceDescriptor {
-                    label: Some("gpu fluid"),
-                    required_limits: adapter.limits(),
-                    ..Default::default()
-                })
-                .await
-                .map_err(|e| format!("could not create a GPU device: {e}"))?;
-            Ok(Self::new(device, queue, name))
-        })
+        let (device, queue, name) = headless_device()?;
+        Ok(Self::new(device, queue, name))
     }
 
     /// Name of the GPU (or software renderer) in use.
@@ -367,9 +353,35 @@ impl FluidSolver for GpuSolver {
     }
 }
 
+/// A device of our own, for tests and benchmarks: (device, queue, adapter
+/// name).
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn headless_device() -> Result<(wgpu::Device, wgpu::Queue, String), String> {
+    pollster::block_on(async {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                ..Default::default()
+            })
+            .await
+            .map_err(|e| format!("no GPU adapter: {e}"))?;
+        let name = adapter.get_info().name;
+        let (device, queue) = adapter
+            .request_device(&wgpu::DeviceDescriptor {
+                label: Some("gpu fluid"),
+                required_limits: adapter.limits(),
+                ..Default::default()
+            })
+            .await
+            .map_err(|e| format!("could not create a GPU device: {e}"))?;
+        Ok((device, queue, name))
+    })
+}
+
 /// Copy `bytes` out of a mappable staging buffer, blocking until the GPU is
 /// done.
-fn read<T: Pod>(device: &wgpu::Device, buffer: &wgpu::Buffer, bytes: u64) -> Vec<T> {
+pub(crate) fn read<T: Pod>(device: &wgpu::Device, buffer: &wgpu::Buffer, bytes: u64) -> Vec<T> {
     let slice = buffer.slice(..bytes);
     slice.map_async(wgpu::MapMode::Read, |result| {
         result.expect("mapping a GPU readback buffer failed");
