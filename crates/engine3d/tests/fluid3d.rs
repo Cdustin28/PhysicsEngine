@@ -18,8 +18,11 @@ fn run(w: &mut World, seconds: f32) {
 fn still_tank(depth: f32) -> World {
     let mut w = presets::tank(1.0, 1.0, 1.0);
     let bodies = w.bodies.clone();
-    w.fluid
-        .fill_box(Vec3::new(-0.5, 0.0, -0.5), Vec3::new(0.5, depth, 0.5), &bodies);
+    w.fluid.fill_box(
+        Vec3::new(-0.5, 0.0, -0.5),
+        Vec3::new(0.5, depth, 0.5),
+        &bodies,
+    );
     w
 }
 
@@ -34,7 +37,13 @@ fn still_water_has_hydrostatic_pressure_and_does_not_leak() {
     for _ in 0..120 {
         w.step(DT);
         // Free surface: half a spacing above the highest particle center.
-        let surface = w.fluid.positions.iter().map(|p| p.y).fold(0.0_f32, f32::max) + 0.05;
+        let surface = w
+            .fluid
+            .positions
+            .iter()
+            .map(|p| p.y)
+            .fold(0.0_f32, f32::max)
+            + 0.05;
         for (p, &pressure) in w.fluid.positions.iter().zip(w.fluid.pressures()) {
             // Away from walls and floor, where boundary handling skews it.
             if p.x.abs() < 0.25 && p.z.abs() < 0.25 {
@@ -71,7 +80,12 @@ fn dam_break_stays_in_the_tank() {
     let n = w.fluid.len();
     run(&mut w, 2.0);
     // The front reaches the far wall at x = 1.5 within the first second.
-    let front = w.fluid.positions.iter().map(|p| p.x).fold(f32::MIN, f32::max);
+    let front = w
+        .fluid
+        .positions
+        .iter()
+        .map(|p| p.x)
+        .fold(f32::MIN, f32::max);
     assert!(front > 1.3, "front at {front}");
     let outside = w
         .fluid
@@ -95,8 +109,11 @@ fn floating_cubes_sink_to_archimedes_depth() {
     // quarter.
     let mut w = presets::tank(2.0, 1.0, 1.0);
     let bodies = w.bodies.clone();
-    w.fluid
-        .fill_box(Vec3::new(-1.0, 0.0, -0.5), Vec3::new(1.0, 0.5, 0.5), &bodies);
+    w.fluid.fill_box(
+        Vec3::new(-1.0, 0.0, -0.5),
+        Vec3::new(1.0, 0.5, 0.5),
+        &bodies,
+    );
     let mut ids = Vec::new();
     for (x, density) in [(-0.5, 500.0), (0.5, 250.0)] {
         let mut b = RigidBody::new(Shape::cube(0.3), Vec3::new(x, 0.75, 0.0));
@@ -164,7 +181,10 @@ fn fluid_and_body_exchange_momentum_exactly() {
     run(&mut w, 1.0);
     let after = total(&w);
     let ball_v = w.body(id).unwrap().velocity.x;
-    assert!(ball_v < 1.8, "the ball should have been slowed, v = {ball_v}");
+    assert!(
+        ball_v < 1.8,
+        "the ball should have been slowed, v = {ball_v}"
+    );
     assert!(
         (after - before).length() < 0.01 * before.length(),
         "momentum {before} -> {after}"

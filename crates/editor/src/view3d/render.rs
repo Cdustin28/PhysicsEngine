@@ -1,5 +1,8 @@
-//! Draws 3D bodies with the GPU: a unit cube and a unit sphere mesh, each
-//! drawn once per body (instanced) with its position, rotation, and size.
+//! Draws 3D bodies and fluid particles with the GPU: a unit cube and a unit
+//! sphere mesh, each drawn once per body (instanced) with its position,
+//! rotation, and size. Particles use a low-poly sphere (96 triangles), so
+//! 20,000 of them are about 2 million triangles: easy for any GPU, and they
+//! sort correctly against bodies through the depth buffer.
 //!
 //! Like the particle renderer, it plugs into egui as a paint callback. The
 //! editor asks eframe for a depth buffer (see `main.rs`), so bodies hide each
@@ -141,9 +144,12 @@ pub struct BodyRenderer {
     bind_group: wgpu::BindGroup,
     cube: Mesh,
     sphere: Mesh,
+    particle: Mesh,
     instances: wgpu::Buffer,
     capacity: usize,
+    /// Instance ranges: cubes, then spheres, then particles.
     cubes: u32,
+    spheres_end: u32,
     total: u32,
 }
 
@@ -243,6 +249,7 @@ impl BodyRenderer {
         });
         let (cv, ci) = cube_mesh();
         let (sv, si) = sphere_mesh(32, 16);
+        let (pv, pi) = sphere_mesh(8, 6);
         let capacity = 256;
         Self {
             pipeline,
@@ -250,9 +257,11 @@ impl BodyRenderer {
             bind_group,
             cube: Mesh::new(device, &cv, &ci),
             sphere: Mesh::new(device, &sv, &si),
+            particle: Mesh::new(device, &pv, &pi),
             instances: instance_buffer(device, capacity),
             capacity,
             cubes: 0,
+            spheres_end: 0,
             total: 0,
         }
     }
@@ -341,22 +350,32 @@ fn sphere_mesh(segments: u32, rings: u32) -> (Vec<Vertex>, Vec<u32>) {
     (vertices, indices)
 }
 
-/// One frame's bodies, handed to egui as a paint callback. Cubes come first
-/// in `instances`, then spheres.
+/// One frame's bodies and particles, handed to egui as a paint callback.
 pub struct BodyCallback {
+    /// Cubes, then spheres, then particles.
     instances: Vec<Instance>,
     cubes: u32,
+    spheres_end: u32,
     globals: Globals,
 }
 
 impl BodyCallback {
-    pub fn new(cubes: Vec<Instance>, spheres: Vec<Instance>, view_proj: Mat4, eye: Vec3) -> Self {
+    pub fn new(
+        cubes: Vec<Instance>,
+        spheres: Vec<Instance>,
+        particles: Vec<Instance>,
+        view_proj: Mat4,
+        eye: Vec3,
+    ) -> Self {
         let n = cubes.len() as u32;
+        let spheres_end = n + spheres.len() as u32;
         let mut instances = cubes;
         instances.extend(spheres);
+        instances.extend(particles);
         Self {
             instances,
             cubes: n,
+            spheres_end,
             globals: Globals {
                 view_proj: view_proj.to_cols_array_2d(),
                 eye: eye.extend(1.0).to_array(),
@@ -390,6 +409,7 @@ impl CallbackTrait for BodyCallback {
         queue.write_buffer(&r.globals, 0, bytemuck::bytes_of(&self.globals));
         queue.write_buffer(&r.instances, 0, bytemuck::cast_slice(&self.instances));
         r.cubes = self.cubes;
+        r.spheres_end = self.spheres_end;
         r.total = self.instances.len() as u32;
         Vec::new()
     }
@@ -409,7 +429,11 @@ impl CallbackTrait for BodyCallback {
         pass.set_pipeline(&r.pipeline);
         pass.set_bind_group(0, &r.bind_group, &[]);
         pass.set_vertex_buffer(1, r.instances.slice(..));
-        for (mesh, range) in [(&r.cube, 0..r.cubes), (&r.sphere, r.cubes..r.total)] {
+        for (mesh, range) in [
+            (&r.cube, 0..r.cubes),
+            (&r.sphere, r.cubes..r.spheres_end),
+            (&r.particle, r.spheres_end..r.total),
+        ] {
             if range.is_empty() {
                 continue;
             }
@@ -426,7 +450,7 @@ mod tests {
 
     #[test]
     fn meshes_are_closed_and_in_range() {
-        for (v, i) in [cube_mesh(), sphere_mesh(32, 16)] {
+        for (v, i) in [cube_mesh(), sphere_mesh(32, 16), sphere_mesh(8, 6)] {
             assert_eq!(i.len() % 3, 0);
             assert!(i.iter().all(|&k| (k as usize) < v.len()));
             for vertex in &v {
@@ -435,6 +459,7 @@ mod tests {
             }
         }
         assert_eq!(cube_mesh().1.len(), 36);
+        assert_eq!(sphere_mesh(8, 6).1.len() / 3, 96);
     }
 
     #[test]

@@ -27,6 +27,8 @@ enum Tool {
     Select,
     Sphere,
     Box,
+    /// Click to drop a block of water.
+    Water,
 }
 
 /// Parameters for the next body placed with the Sphere or Box tool.
@@ -38,6 +40,8 @@ struct NewBody {
     size: Vec3,
     density: f32,
     is_static: bool,
+    /// Size of the block of water the Water tool drops, m.
+    water_size: Vec3,
 }
 
 impl Default for NewBody {
@@ -47,6 +51,7 @@ impl Default for NewBody {
             size: Vec3::ONE,
             density: RigidBody::DEFAULT_DENSITY,
             is_static: false,
+            water_size: Vec3::new(1.0, 0.6, 1.0),
         }
     }
 }
@@ -54,7 +59,7 @@ impl Default for NewBody {
 impl NewBody {
     fn shape(&self, tool: Tool) -> Option<Shape> {
         match tool {
-            Tool::Select => None,
+            Tool::Select | Tool::Water => None,
             Tool::Sphere => Some(Shape::Sphere {
                 radius: self.radius,
             }),
@@ -171,6 +176,7 @@ impl Editor3d {
         match Scene::from_json(json) {
             Ok(scene) => {
                 self.replace_world(scene.world);
+                self.frame_scene();
                 self.status = format!("Loaded {source}.");
                 true
             }
@@ -303,6 +309,36 @@ impl Editor3d {
         }
     }
 
+    /// Point the camera at the scene: the bodies (except huge ones like the
+    /// floor) and the water, from above and at a distance that fits them.
+    fn frame_scene(&mut self) {
+        let mut lo = Vec3::splat(f32::INFINITY);
+        let mut hi = Vec3::splat(f32::NEG_INFINITY);
+        for b in &self.world.bodies {
+            let extent = match b.shape {
+                Shape::Sphere { radius } => Vec3::splat(radius),
+                Shape::Cuboid { half_extents } => Vec3::splat(half_extents.length()),
+            };
+            if extent.x < 5.0 {
+                lo = lo.min(b.position - extent);
+                hi = hi.max(b.position + extent);
+            }
+        }
+        for &p in &self.world.fluid.positions {
+            lo = lo.min(p);
+            hi = hi.max(p);
+        }
+        if !lo.is_finite() {
+            self.camera = OrbitCamera::default();
+            return;
+        }
+        let radius = 0.5 * (hi - lo).length();
+        self.camera.target = 0.5 * (lo + hi);
+        self.camera.distance = (2.5 * radius).clamp(4.0, 60.0);
+        // Steep enough (about 50° down) to see into a tank over its walls.
+        self.camera.pitch = self.camera.pitch.max(0.85);
+    }
+
     /// Aim the camera at the selected body.
     fn focus_selected(&mut self) {
         if let Some(b) = self.selected().and_then(|id| self.world.body(id)) {
@@ -353,6 +389,9 @@ impl Editor3d {
         }
         if pressed(Key::B) {
             self.tool = Tool::Box;
+        }
+        if pressed(Key::W) {
+            self.tool = Tool::Water;
         }
         if pressed(Key::F) {
             self.focus_selected();

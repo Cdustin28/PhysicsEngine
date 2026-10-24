@@ -9,6 +9,11 @@ const CARDINAL: Color32 = Color32::from_rgb(0xC8, 0x10, 0x2E);
 const STATIC_FILL: Color32 = Color32::from_rgb(0xB4, 0xB6, 0xB9);
 const CONTACT_COLOR: Color32 = Color32::from_rgb(0x1F, 0x4E, 0x9A);
 const SKY: Color32 = Color32::from_rgb(0xEE, 0xF1, 0xF5);
+/// Water: deep blue at rest, pale when fast.
+const WATER_DEEP: Color32 = Color32::from_rgb(0x1F, 0x4E, 0x9A);
+const WATER_LIGHT: Color32 = Color32::from_rgb(0xA8, 0xDD, 0xF7);
+/// Speed shown at full brightness, m/s.
+const SPEED_COLOR_SCALE: f32 = 3.0;
 
 impl Editor3d {
     /// Play/Pause, Step, Reset, speed, Undo/Redo, New, Examples.
@@ -77,6 +82,7 @@ impl Editor3d {
             });
         if let Some((name, make)) = chosen {
             self.replace_world(make());
+            self.frame_scene();
             self.status = format!(
                 "Loaded the {} example. Press Space to play.",
                 crate::app::title_case(name)
@@ -91,11 +97,15 @@ impl Editor3d {
                 ui.selectable_value(&mut self.tool, Tool::Select, "Select (V)");
                 ui.selectable_value(&mut self.tool, Tool::Sphere, "Sphere (C)");
                 ui.selectable_value(&mut self.tool, Tool::Box, "Box (B)");
+                ui.selectable_value(&mut self.tool, Tool::Water, "Water (W)");
             });
             self.tool_options(ui);
 
             ui.separator();
             self.world_panel(ui);
+
+            ui.separator();
+            self.fluid_panel(ui);
 
             ui.separator();
             ui.heading("Selection");
@@ -112,7 +122,7 @@ impl Editor3d {
 
             ui.separator();
             ui.collapsing("Controls", |ui| {
-                ui.label("Left-click: select, or place with Sphere/Box");
+                ui.label("Left-click: select, or place with Sphere/Box/Water");
                 ui.label("Left-drag: move on the ground plane");
                 ui.label("Shift + left-drag: move up and down");
                 ui.label("Right-drag: orbit");
@@ -145,6 +155,63 @@ impl Editor3d {
                 });
                 ui.weak("Click in the view to place.");
             }
+            Tool::Water => {
+                egui::Grid::new("new_water3d")
+                    .num_columns(2)
+                    .show(ui, |ui| {
+                        length_row(ui, "Width", &mut nb.water_size.x);
+                        length_row(ui, "Height", &mut nb.water_size.y);
+                        length_row(ui, "Depth", &mut nb.water_size.z);
+                    });
+                let spacing = self.world.fluid.params.particle_spacing;
+                let count = (nb.water_size / spacing).floor();
+                ui.weak(format!(
+                    "Click to drop a block of water (about {} particles).",
+                    (count.x * count.y * count.z) as u64
+                ));
+            }
+        }
+    }
+
+    fn fluid_panel(&mut self, ui: &mut Ui) {
+        ui.heading("Water");
+        let fluid = &mut self.world.fluid;
+        egui::Grid::new("fluid3d").num_columns(2).show(ui, |ui| {
+            ui.label("Particles");
+            ui.label(format!("{}", fluid.len()));
+            ui.end_row();
+            ui.label("Spacing").on_hover_text(
+                "Distance between particles. Halving it means 8× as many particles.",
+            );
+            let empty = fluid.is_empty();
+            ui.add_enabled(
+                empty,
+                egui::DragValue::new(&mut fluid.params.particle_spacing)
+                    .speed(0.002)
+                    .range(0.04..=0.3)
+                    .suffix(" m"),
+            )
+            .on_disabled_hover_text("Drain the water to change the resolution");
+            ui.end_row();
+            ui.label("Viscosity");
+            ui.add(egui::Slider::new(&mut fluid.params.viscosity, 0.0..=0.5));
+            ui.end_row();
+            if !empty {
+                ui.label("Compression");
+                ui.label(format!(
+                    "{:.1}% max · {} substeps",
+                    100.0 * fluid.stats.max_compression,
+                    fluid.stats.substeps
+                ));
+                ui.end_row();
+            }
+        });
+        if ui
+            .add_enabled(!fluid.is_empty(), egui::Button::new("Drain all water"))
+            .clicked()
+        {
+            fluid.clear();
+            self.status = "Drained.".into();
         }
     }
 
@@ -225,6 +292,14 @@ impl Editor3d {
         ui.label(format!("t = {:.2} s", self.world.time));
         ui.separator();
         ui.label(format!("{} bodies", self.world.bodies.len()));
+        if !self.world.fluid.is_empty() {
+            ui.separator();
+            ui.label(format!(
+                "{} particles · {} substeps",
+                self.world.fluid.len(),
+                self.world.fluid.stats.substeps
+            ));
+        }
         ui.separator();
         ui.label(format!("KE {:.2} J", self.world.kinetic_energy()));
         ui.separator();
@@ -267,6 +342,13 @@ impl Editor3d {
                     && let Some(p) = response.interact_pointer_pos()
                 {
                     self.place(rect, p);
+                }
+            }
+            Tool::Water => {
+                if response.clicked_by(PointerButton::Primary)
+                    && let Some(p) = response.interact_pointer_pos()
+                {
+                    self.pour(rect, p);
                 }
             }
         }
@@ -373,20 +455,43 @@ impl Editor3d {
         grab.prev_position = target;
     }
 
-    /// Place a new body where the mouse points: on top of whatever is there,
-    /// or on the ground plane y = 0.
-    fn place(&mut self, rect: Rect, p: Pos2) {
-        let Some(shape) = self.new_body.shape(self.tool) else {
-            return;
-        };
+    /// The point under the mouse: on whatever body is there, or on the
+    /// ground plane y = 0.
+    fn ground_point(&mut self, rect: Rect, p: Pos2) -> Option<Vec3> {
         let (origin, dir) = self.camera.ray(rect, p);
         let ground = self
             .world
             .raycast(origin, dir)
             .map(|(_, t)| origin + t * dir)
             .or_else(|| ray_plane(origin, dir, Vec3::ZERO, Vec3::Y));
-        let Some(ground) = ground else {
+        if ground.is_none() {
             self.status = "Point at the ground or a body to place.".into();
+        }
+        ground
+    }
+
+    /// Drop a block of water standing on the point under the mouse.
+    fn pour(&mut self, rect: Rect, p: Pos2) {
+        let Some(ground) = self.ground_point(rect, p) else {
+            return;
+        };
+        let size = self.new_body.water_size;
+        let lo = ground + Vec3::new(-0.5 * size.x, 0.0, -0.5 * size.z);
+        let added = self.world.fluid.fill_box(lo, lo + size, &self.world.bodies);
+        self.status = if added == 0 {
+            "No room for water there.".into()
+        } else {
+            format!("Added {added} water particles. Press Space to play.")
+        };
+    }
+
+    /// Place a new body where the mouse points: on top of whatever is there,
+    /// or on the ground plane y = 0.
+    fn place(&mut self, rect: Rect, p: Pos2) {
+        let Some(shape) = self.new_body.shape(self.tool) else {
+            return;
+        };
+        let Some(ground) = self.ground_point(rect, p) else {
             return;
         };
         let half_height = match shape {
@@ -427,9 +532,35 @@ impl Editor3d {
                 color: color.to_array(),
             });
         }
+        let fluid = &self.world.fluid;
+        let radius = Vec3::splat(0.55 * fluid.params.particle_spacing).to_array();
+        let particles = fluid
+            .positions
+            .iter()
+            .zip(
+                fluid
+                    .velocities
+                    .iter()
+                    .chain(std::iter::repeat(&Vec3::ZERO)),
+            )
+            .map(|(p, v)| Instance {
+                position: p.to_array(),
+                checker: 0.0,
+                scale: radius,
+                highlight: 0.0,
+                rotation: [0.0, 0.0, 0.0, 1.0],
+                color: lerp_color(
+                    WATER_DEEP,
+                    WATER_LIGHT,
+                    (v.length() / SPEED_COLOR_SCALE).min(1.0),
+                )
+                .to_array(),
+            })
+            .collect();
         BodyCallback::new(
             cubes,
             spheres,
+            particles,
             self.camera.view_proj(rect),
             self.camera.eye(),
         )
@@ -471,6 +602,11 @@ impl Editor3d {
             );
         }
     }
+}
+
+fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
+    let mix = |x: u8, y: u8| (f32::from(x) + (f32::from(y) - f32::from(x)) * t).round() as u8;
+    Color32::from_rgb(mix(a.r(), b.r()), mix(a.g(), b.g()), mix(a.b(), b.b()))
 }
 
 fn length_row(ui: &mut Ui, label: &str, value: &mut f32) {

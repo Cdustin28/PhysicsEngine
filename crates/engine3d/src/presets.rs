@@ -52,8 +52,11 @@ pub fn tank(width: f32, depth: f32, height: f32) -> World {
 pub fn dam_break() -> World {
     let mut w = tank(3.0, 1.2, 1.2);
     let bodies = w.bodies.clone();
-    w.fluid
-        .fill_box(Vec3::new(-1.5, 0.0, -0.6), Vec3::new(-0.6, 1.0, 0.6), &bodies);
+    w.fluid.fill_box(
+        Vec3::new(-1.5, 0.0, -0.6),
+        Vec3::new(-0.6, 1.0, 0.6),
+        &bodies,
+    );
     w
 }
 
@@ -61,16 +64,19 @@ pub fn dam_break() -> World {
 /// in, cork (250) floats high, a ball of 600 floats low, and steel-ish
 /// (2000) sinks.
 pub fn buoyancy() -> World {
-    let mut w = tank(2.4, 2.4, 1.2);
+    let mut w = tank(2.0, 2.0, 1.0);
     let bodies = w.bodies.clone();
-    w.fluid
-        .fill_box(Vec3::new(-1.2, 0.0, -1.2), Vec3::new(1.2, 0.7, 1.2), &bodies);
-    for (x, z, density) in [(-0.6, -0.6, 500.0), (0.6, -0.6, 250.0), (-0.6, 0.6, 2000.0)] {
+    w.fluid.fill_box(
+        Vec3::new(-1.0, 0.0, -1.0),
+        Vec3::new(1.0, 0.6, 1.0),
+        &bodies,
+    );
+    for (x, z, density) in [(-0.5, -0.5, 500.0), (0.5, -0.5, 250.0), (-0.5, 0.5, 2000.0)] {
         let mut b = RigidBody::new(Shape::cube(0.4), Vec3::new(x, 1.2, z));
         b.density = density;
         w.add_body(b);
     }
-    let mut ball = RigidBody::new(Shape::Sphere { radius: 0.25 }, Vec3::new(0.6, 1.2, 0.6));
+    let mut ball = RigidBody::new(Shape::Sphere { radius: 0.25 }, Vec3::new(0.5, 1.2, 0.5));
     ball.density = 600.0;
     w.add_body(ball);
     w
