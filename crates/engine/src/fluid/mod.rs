@@ -215,7 +215,7 @@ pub struct FluidStats {
 }
 
 /// Scratch arrays reused across substeps.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 struct Scratch {
     densities: Vec<f32>,
     pressures: Vec<f32>,
@@ -223,6 +223,15 @@ struct Scratch {
     fluid_neighbors: Vec<Vec<u32>>,
     boundary_neighbors: Vec<Vec<u32>>,
     grid: NeighborGrid,
+}
+
+impl Clone for Scratch {
+    /// Scratch space is rebuilt every substep, so a copy of a fluid (an undo
+    /// snapshot, the state saved when Play is pressed) starts with none
+    /// rather than copying thousands of neighbor lists.
+    fn clone(&self) -> Self {
+        Self::default()
+    }
 }
 
 /// The fluid: particle positions and velocities, stored as separate arrays

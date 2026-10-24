@@ -33,7 +33,7 @@ pub mod shape;
 pub mod solver;
 pub mod world;
 
-pub use body::{BodyId, RigidBody};
+pub use body::{BodyHandle, BodyId, RigidBody};
 pub use collision::{ContactPoint, Manifold};
 pub use fluid::{Fluid, FluidParams};
 pub use glam::Vec2;

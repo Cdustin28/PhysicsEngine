@@ -3,7 +3,8 @@
 use eframe::egui::{Pos2, Rect, vec2};
 use glam::Vec2;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct Camera {
     /// World point shown at the center of the viewport, m.
     pub center: Vec2,

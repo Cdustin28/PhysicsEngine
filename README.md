@@ -2,9 +2,9 @@
 
 A 2D rigid-body and particle-fluid physics engine with an interactive editor, written in Rust. It runs on Windows, macOS, Linux, and in the browser. 3D is planned once 2D is solid.
 
-Website: [physicsengine.dev](https://physicsengine.dev) · Plan: [ROADMAP.md](ROADMAP.md)
+Website: [physicsengine.dev](https://physicsengine.dev) · Simulator in your browser: [physicsengine.dev/sim](https://physicsengine.dev/sim/) · Plan: [ROADMAP.md](ROADMAP.md)
 
-> **Status:** milestone M3. Rigid boxes and circles collide, stack, bounce, and slide with friction. SPH water flows around them, and bodies float, sink, and get pushed by it. Next up is the web release at physicsengine.dev (M4).
+> **Status:** milestone M4. Rigid boxes and circles collide, stack, bounce, and slide with friction. SPH water flows around them, and bodies float, sink, and get pushed by it. The editor has undo, multi-select, snapping, and runs in the browser. GPU acceleration (M5) is next.
 
 ## Running it
 
@@ -36,21 +36,24 @@ trunk serve --release   # then open http://127.0.0.1:8080
 | Action | Input |
 | --- | --- |
 | Select / place | Left-click (tool chosen in the sidebar) |
-| Move a body | Left-drag with the Select tool. Release while playing to throw it. |
-| Rotate a body | Select it, then drag the gold handle |
+| Select several | Shift+click to add or remove · drag on empty space to box-select · Ctrl+A for all |
+| Move | Drag any selected body; the whole selection moves. Release while playing to throw. |
+| Rotate / resize | Select one body, then drag its round (rotate) or square (resize) gold handle |
+| Undo / redo | Ctrl+Z · Ctrl+Shift+Z or Ctrl+Y (or the toolbar buttons) |
+| Snap to grid | G, or the Snap checkbox (positions and sizes to ¼ grid, angles to 15°) |
 | Pan | Right- or middle-drag |
 | Zoom | Scroll wheel or pinch |
 | Play / pause | Space |
 | Single step | `.` |
 | Reset to before Play | R |
-| Tools | V select · C circle · B box · Esc back to select |
+| Tools | V select · C circle · B box · F fluid · E erase · Esc deselect |
 | Delete selected | Delete / Backspace |
 | Contact overlay | D, or the checkbox under World |
 | Add water | F, then drag a rectangle (or switch to Brush and paint) |
 | Erase water | E, then drag |
 | Fluid force arrows | Fluid panel → Show forces on bodies (an arrow the length of the body's weight is 1 m) |
 
-Scenes save as human-readable JSON. **Save…/Open…** use file dialogs on desktop, and **Copy JSON/Paste JSON…** work everywhere. **Examples** loads the built-in scenes (demo, 55-box pyramid, friction ramps, bouncing balls, dam break, buoyancy). The same scenes are in [`scenes/`](scenes); regenerate them with `cargo run -p engine --example make_scenes`.
+Scenes save as human-readable JSON. **Open…/Save…** use file dialogs on desktop; in the browser, Open uses the browser's file picker and Save downloads `scene.json`. **Copy JSON/Paste JSON…** work everywhere. Your settings and current scene are remembered between sessions. **Examples** loads the built-in scenes (demo, 55-box pyramid, friction ramps, bouncing balls, dam break, buoyancy). The same scenes are in [`scenes/`](scenes); regenerate them with `cargo run -p engine --example make_scenes`.
 
 ## Layout
 
@@ -63,7 +66,10 @@ crates/
     examples/          make_scenes (regenerate scenes/), bench_fluid (performance)
   editor/   eframe/egui app: canvas, tools, inspector. Builds native and wasm.
 scenes/     example scene files
-index.html  physicsengine.dev landing page (served by GitHub Pages)
+index.html  physicsengine.dev landing page
+.github/workflows/
+  ci.yml      fmt, clippy, tests, desktop + web builds
+  deploy.yml  publishes physicsengine.dev from main (landing page, /sim/, /scenes/)
 ```
 
 Units are SI throughout: meters, kilograms, seconds, radians. 2D density is kg/m². Water is 10 kg/m² (1000 kg/m³ × 1 cm), the same scale as body densities: a body of density 5 floats half-submerged, and anything above 10 sinks.
