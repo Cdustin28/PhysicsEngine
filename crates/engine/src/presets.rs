@@ -21,6 +21,7 @@ pub const ALL: &[Preset] = &[
     ("rope_bridge", rope_bridge),
     ("newtons_cradle", newtons_cradle),
     ("springs", springs),
+    ("soft_bodies", soft_bodies),
 ];
 
 /// A 20 m static floor whose top surface is at y = 0.
@@ -282,6 +283,27 @@ pub fn springs() -> World {
             &w.bodies, id, anchor, None, top, stiffness, damping,
         ));
     }
+    w
+}
+
+/// Jelly and blobs: a soft blob, a jelly block, a stiff blob, and a crate
+/// for them to land on and push around.
+pub fn soft_bodies() -> World {
+    use crate::soft::SoftBody;
+    let mut w = with_floor();
+    w.add_body(RigidBody::new_static(Shape::rect(2.0, 0.3), Vec2::new(-2.5, 1.5)).with_angle(-0.3));
+    let mut crate_ = RigidBody::new(Shape::rect(0.6, 0.6), Vec2::new(2.5, 0.3));
+    crate_.density = 2.0;
+    w.add_body(crate_);
+    let mut soft = SoftBody::blob(Vec2::new(-2.8, 3.0), 0.5, 32, 1.0);
+    soft.edge_stiffness = 300.0;
+    soft.area_stiffness = 5000.0;
+    w.soft_bodies.push(soft);
+    w.soft_bodies
+        .push(SoftBody::block(Vec2::new(0.0, 2.5), 1.2, 0.8, 9, 6, 2.0));
+    let mut stiff = SoftBody::blob(Vec2::new(2.5, 3.5), 0.4, 28, 2.0);
+    stiff.edge_stiffness = 20_000.0;
+    w.soft_bodies.push(stiff);
     w
 }
 

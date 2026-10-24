@@ -154,6 +154,7 @@ impl EditorApp {
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut self.tool, Tool::Joint, "Joint (J)");
                 ui.selectable_value(&mut self.tool, Tool::Chain, "Chain (L)");
+                ui.selectable_value(&mut self.tool, Tool::Soft, "Soft (S)");
             });
             self.tool_options(ui);
 
@@ -166,7 +167,11 @@ impl EditorApp {
             ui.separator();
             ui.heading("Selection");
             let ids = self.selected_ids();
+            if let Some(i) = self.selected_soft {
+                self.soft_inspector(ui, i);
+            }
             match ids[..] {
+                [] if self.selected_soft.is_some() => {}
                 [] => {
                     ui.weak("Nothing selected. Click a body, Shift+click to add more, or drag a box around several.");
                 }
@@ -229,6 +234,7 @@ impl EditorApp {
             Tool::Select => {}
             Tool::Joint => self.joint_tool_options(ui),
             Tool::Chain => self.chain_tool_options(ui),
+            Tool::Soft => self.soft_tool_options(ui),
             Tool::Fluid => {
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {

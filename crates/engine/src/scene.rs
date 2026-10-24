@@ -60,8 +60,9 @@ pub struct Scene {
 
 impl Scene {
     pub const FORMAT: &'static str = "physicsengine-scene";
-    /// 2 added `fluid`, 3 added `joints`. Older files load unchanged.
-    pub const VERSION: u32 = 3;
+    /// 2 added `fluid`, 3 `joints`, 4 `soft_bodies`. Older files load
+    /// unchanged.
+    pub const VERSION: u32 = 4;
     /// Oldest version this build can read.
     pub const OLDEST_SUPPORTED: u32 = 1;
 
@@ -103,6 +104,11 @@ impl Scene {
                 .map_err(|e| SceneError::Invalid(format!("body {i}: {e}")))?;
         }
         scene.world.fluid.validate().map_err(SceneError::Invalid)?;
+        for (i, s) in scene.world.soft_bodies.iter_mut().enumerate() {
+            s.validate()
+                .map_err(|e| SceneError::Invalid(format!("soft body {i}: {e}")))?;
+            s.velocities.resize(s.positions.len(), glam::Vec2::ZERO);
+        }
         for (i, joint) in scene.world.joints.iter().enumerate() {
             joint
                 .validate(scene.world.bodies.len())
