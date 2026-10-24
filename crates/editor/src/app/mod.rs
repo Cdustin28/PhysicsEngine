@@ -10,6 +10,7 @@
 
 mod canvas;
 mod io;
+mod joints;
 mod panels;
 
 pub(crate) use panels::title_case;
@@ -69,6 +70,10 @@ enum Tool {
     Fluid,
     /// Remove fluid particles under the brush.
     Erase,
+    /// Pin, rod, rope, or spring between bodies.
+    Joint,
+    /// Drag out a chain of pinned links.
+    Chain,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -109,7 +114,7 @@ impl Default for NewBodySettings {
 impl NewBodySettings {
     fn shape(&self, tool: Tool) -> Option<Shape> {
         match tool {
-            Tool::Select | Tool::Fluid | Tool::Erase => None,
+            Tool::Select | Tool::Fluid | Tool::Erase | Tool::Joint | Tool::Chain => None,
             Tool::Circle => Some(Shape::Circle {
                 radius: self.radius,
             }),
@@ -203,6 +208,7 @@ impl Snapper {
 #[serde(default)]
 struct Persisted {
     mode: Mode,
+    joint_settings: joints::JointSettings,
     view3d: Persisted3d,
     camera: Camera,
     new_body: NewBodySettings,
@@ -223,6 +229,7 @@ impl Default for Persisted {
     fn default() -> Self {
         Self {
             mode: Mode::TwoD,
+            joint_settings: joints::JointSettings::default(),
             view3d: Persisted3d::default(),
             camera: Camera::default(),
             new_body: NewBodySettings::default(),
@@ -268,6 +275,11 @@ pub struct EditorApp {
     fluid_rect_start: Option<Vec2>,
     color_by: ColorBy,
     show_fluid_forces: bool,
+    joint_settings: joints::JointSettings,
+    /// Body and point where a rod/rope/spring drag started.
+    joint_drag: Option<(usize, Vec2)>,
+    /// Where a chain drag started.
+    chain_start: Option<Vec2>,
 
     /// Text of the "Paste scene JSON" window while it is open.
     paste_buffer: Option<String>,
@@ -397,6 +409,9 @@ impl EditorApp {
             fluid_rect_start: None,
             color_by: p.color_by,
             show_fluid_forces: p.show_fluid_forces,
+            joint_settings: p.joint_settings.clone(),
+            joint_drag: None,
+            chain_start: None,
             paste_buffer: None,
             pending_open: io::PendingFile::default(),
             status,
@@ -411,6 +426,7 @@ impl EditorApp {
     fn persisted(&self) -> Persisted {
         Persisted {
             mode: self.mode,
+            joint_settings: self.joint_settings.clone(),
             view3d: self.view3d.persisted(),
             camera: self.camera,
             new_body: self.new_body.clone(),
@@ -511,6 +527,8 @@ impl EditorApp {
         let busy = self.running
             || self.drag.is_some()
             || self.fluid_rect_start.is_some()
+            || self.joint_drag.is_some()
+            || self.chain_start.is_some()
             || ctx.input(|i| i.pointer.any_down());
         if !busy {
             self.history.record(&self.world);
@@ -674,6 +692,12 @@ impl EditorApp {
         }
         if pressed(Key::E) {
             self.tool = Tool::Erase;
+        }
+        if pressed(Key::J) {
+            self.tool = Tool::Joint;
+        }
+        if pressed(Key::L) {
+            self.tool = Tool::Chain;
         }
         if pressed(Key::G) {
             self.snap = !self.snap;

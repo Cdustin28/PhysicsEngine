@@ -39,6 +39,8 @@ impl EditorApp {
         match self.tool {
             Tool::Select => self.select_tool_input(ui, &response, viewport, cursor_world),
             Tool::Fluid | Tool::Erase => self.fluid_tool_input(ui, &response, viewport),
+            Tool::Joint => self.joint_tool_input(ui, &response, cursor_world),
+            Tool::Chain => self.chain_tool_input(ui, &response, cursor_world),
             Tool::Circle | Tool::Box => {
                 if response.clicked_by(PointerButton::Primary)
                     && let Some(p) = cursor_world
@@ -87,6 +89,8 @@ impl EditorApp {
             }
         }
 
+        self.draw_joints(&painter, viewport);
+        self.draw_joint_preview(&painter, viewport, cursor_world);
         self.draw_fluid_tool_preview(&painter, viewport, cursor_world);
 
         // Ghost preview of the object about to be placed.
