@@ -302,7 +302,7 @@ impl FluidSolver for GpuSolver3d {
             Vec::new()
         };
 
-        for (i, pair) in particles.chunks_exact(2).enumerate() {
+        for (i, pair) in particles.as_chunks::<2>().0.iter().enumerate() {
             fluid.positions[i] = Vec3::new(pair[0][0], pair[0][1], pair[0][2]);
             fluid.velocities[i] = Vec3::new(pair[1][0], pair[1][1], pair[1][2]);
         }
