@@ -1,0 +1,16 @@
+[package]
+name = "engine3d"
+description = "3D rigid-body physics: spheres and boxes, collisions, friction, restitution."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+glam.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

@@ -1110,6 +1110,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "engine3d"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "enumflags2"
 version = "0.7.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
