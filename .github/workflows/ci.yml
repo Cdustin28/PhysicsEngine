@@ -23,7 +23,12 @@ jobs:
       - name: Linux GUI dependencies, plus lavapipe (software Vulkan) for the GPU tests
         run: sudo apt-get update && sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev mesa-vulkan-drivers
       - run: cargo fmt --all -- --check
-      - run: cargo clippy --workspace --all-targets --locked
+      - name: clippy (debug annotations)
+        run: |
+          cargo clippy --workspace --all-targets --locked --message-format=short 2>&1 | tee clippy.txt || true
+          rustc --version | sed 's/^/::warning::/'
+          grep -E "(error|warning)" clippy.txt | grep -v "^warning: build failed" | head -40 | sed 's/^/::error::/'
+          exit 1
       - run: cargo test --workspace --locked
       # The workspace run builds the engine with the editor's `parallel`
       # feature; this covers the single-threaded path the web build uses.
