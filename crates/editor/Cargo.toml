@@ -1,0 +1,28 @@
+[package]
+name = "editor"
+description = "Interactive editor for physicsengine.dev: place, drag, simulate, save and load scenes."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "physicsengine"
+path = "src/main.rs"
+
+[dependencies]
+engine = { path = "../engine" }
+eframe = "0.37"
+glam.workspace = true
+
+# Native-only: OS file dialogs for Save/Open.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rfd = "0.17"
+
+# Web-only: async entry point for the browser build.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen-futures = "0.4"
+
+[lints]
+workspace = true
