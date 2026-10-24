@@ -5,13 +5,18 @@
 //! - `panels.rs`: toolbar, sidebar, inspector, status bar
 //! - `canvas.rs`: the canvas: mouse interaction and drawing
 //! - `io.rs`: opening and saving scene files, on desktop and in the browser
+//!
+//! The 3D editor lives in `crate::view3d`; this app switches between them.
 
 mod canvas;
 mod io;
 mod panels;
 
+pub(crate) use panels::title_case;
+
 use crate::camera::Camera;
 use crate::history::History;
+use crate::view3d::{Editor3d, Persisted3d};
 use eframe::egui::{self, Color32, Key, KeyboardShortcut, Modifiers, Ui};
 use engine::{BodyHandle, BodyId, FixedTimestep, RigidBody, Scene, Shape, Vec2, World};
 use serde::{Deserialize, Serialize};
@@ -46,6 +51,14 @@ const UNDO_LIMIT: usize = 100;
 /// Fastest speed a "thrown" body can leave the mouse with, m/s. Keeps a
 /// flick of the mouse from launching a body into orbit.
 const MAX_THROW_SPEED: f32 = 30.0;
+
+/// Which editor is showing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+enum Mode {
+    #[default]
+    TwoD,
+    ThreeD,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tool {
@@ -189,6 +202,8 @@ impl Snapper {
 #[derive(Serialize, Deserialize)]
 #[serde(default)]
 struct Persisted {
+    mode: Mode,
+    view3d: Persisted3d,
     camera: Camera,
     new_body: NewBodySettings,
     fluid_shape: FluidShape,
@@ -207,6 +222,8 @@ struct Persisted {
 impl Default for Persisted {
     fn default() -> Self {
         Self {
+            mode: Mode::TwoD,
+            view3d: Persisted3d::default(),
             camera: Camera::default(),
             new_body: NewBodySettings::default(),
             fluid_shape: FluidShape::Rectangle,
@@ -224,6 +241,9 @@ impl Default for Persisted {
 }
 
 pub struct EditorApp {
+    mode: Mode,
+    /// The 3D editor (its own world, camera, history).
+    view3d: Editor3d,
     world: World,
     /// World state captured when Play was pressed, restored by Reset.
     snapshot: Option<World>,
@@ -278,6 +298,8 @@ impl EditorApp {
         let mut app = Self::from_persisted(persisted);
         app.history.rebase(&app.world);
         app.gpu_render = crate::particles::ParticleRenderer::install(cc);
+        let render3d = crate::view3d::render::BodyRenderer::install(cc);
+        app.view3d.set_gpu_render(render3d);
         #[cfg(not(target_arch = "wasm32"))]
         {
             app.gpu_solver = cc.wgpu_render_state.as_ref().and_then(|rs| {
@@ -329,7 +351,7 @@ impl EditorApp {
         }
     }
 
-    fn from_persisted(p: Persisted) -> Self {
+    fn from_persisted(mut p: Persisted) -> Self {
         let (world, status) = match p.scene.as_deref().map(Scene::from_json) {
             Some(Ok(scene)) => (scene.world, "Restored your last scene.".to_owned()),
             Some(Err(e)) => (
@@ -339,6 +361,8 @@ impl EditorApp {
             None => (World::demo(), "Ready. Press Space to play.".to_owned()),
         };
         Self {
+            mode: p.mode,
+            view3d: Editor3d::new(std::mem::take(&mut p.view3d), false),
             world,
             snapshot: None,
             running: false,
@@ -371,6 +395,8 @@ impl EditorApp {
 
     fn persisted(&self) -> Persisted {
         Persisted {
+            mode: self.mode,
+            view3d: self.view3d.persisted(),
             camera: self.camera,
             new_body: self.new_body.clone(),
             fluid_shape: self.fluid_shape,
@@ -382,7 +408,7 @@ impl EditorApp {
             time_scale: self.time_scale,
             step_hz: (1.0 / self.timestep.dt).round() as u32,
             use_gpu: self.use_gpu,
-            scene: Some(self.scene_json()),
+            scene: Some(Scene::from_world(&self.world).to_json()),
         }
     }
 
@@ -563,7 +589,20 @@ impl EditorApp {
     // ---------------------------------------------------------------------
     // Keyboard
 
+    /// Switch between the 2D and 3D editors. Whichever is left is paused.
+    fn set_mode(&mut self, mode: Mode) {
+        if mode != self.mode {
+            self.pause();
+            self.view3d.pause_public();
+            self.mode = mode;
+        }
+    }
+
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
+        if self.mode == Mode::ThreeD {
+            self.view3d.handle_shortcuts(ctx);
+            return;
+        }
         if ctx.egui_wants_keyboard_input() {
             return; // typing in a text field
         }
@@ -638,6 +677,10 @@ impl eframe::App for EditorApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_pending_open();
         self.steps_last_frame = 0;
+        if self.mode == Mode::ThreeD {
+            self.view3d.logic(ctx);
+            return;
+        }
         if self.running {
             // Cap the frame time so a stall (window drag, breakpoint) doesn't
             // dump seconds of backlog into the simulation.
@@ -659,6 +702,18 @@ impl eframe::App for EditorApp {
         // Side panels must be laid out before the central canvas, so the
         // status bar shows last frame's cursor position. Nobody can tell.
         egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui));
+
+        if self.mode == Mode::ThreeD {
+            egui::Panel::left("sidebar3d")
+                .resizable(true)
+                .default_size(290.0)
+                .show(ui, |ui| self.view3d.sidebar(ui));
+            egui::CentralPanel::no_frame().show(ui, |ui| self.view3d.canvas(ui));
+            self.paste_window(&ctx);
+            self.view3d.record_finished_edit(&ctx);
+            self.take_3d_status();
+            return;
+        }
 
         egui::Panel::left("sidebar")
             .resizable(true)

@@ -163,14 +163,39 @@ These apply to every milestone.
 
 ## M6: 3D
 
-**Goal:** the same capabilities in three dimensions.
+**Goal:** the same capabilities in three dimensions. Split in two: **M6a** rigid bodies and the 3D editor (done), **M6b** 3D fluid.
 
-- [ ] Decide between a parallel `engine3d` module and a dimension-generic core. A parallel module is probably simpler for a first pass.
-- [ ] `Vec3`/`Quat` from `glam`, inertia tensors, and angular velocity integration with quaternions
-- [ ] Spheres and boxes; GJK + EPA for convex collision; 3D contact manifolds
-- [ ] 3D SPH, which is a mostly mechanical extension of M2 and M5
-- [ ] wgpu 3D renderer with an orbit camera; translate/rotate gizmos (e.g. `transform-gizmo-egui`)
-- [ ] Scene format v3 with 3D bodies
+### M6a: 3D rigid bodies and editor ✅
+
+- [x] A parallel `engine3d` crate rather than a dimension-generic core: the 2D code stays simple, and the two share structure, not types.
+- [x] `Vec3`/`Quat` from `glam`; world-space inverse inertia tensors (R I⁻¹ Rᵀ); quaternion integration q += ½ ω q dt, renormalized each step
+- [x] Spheres and boxes. Box–box uses SAT over all 15 axes (3 + 3 face normals, 9 edge cross products) with Sutherland–Hodgman face clipping (up to 4 contact points) and edge–edge contacts. GJK/EPA isn't needed until there are general convex shapes.
+- [x] Sequential-impulse solver as in 2D: warm starting (contacts matched by position within 2 cm, since 3D manifolds don't carry stable feature ids), split-impulse position correction, restitution threshold
+- [x] Patch friction: one friction impulse per manifold at its center of pressure, clamped to the Coulomb disc, plus twisting friction. Per-point friction made sliding boxes spin and slide 11% too far; friction at the geometric center (not weighted by load) made a 6-box tower sway forever.
+- [x] Ray casts for mouse picking
+- [x] 3D scene files (`"format": "physicsengine-scene-3d"`, version 1), separate from 2D's; `scenes/3d/`
+- [x] Editor: 2D/3D switch; GPU renderer (instanced cube and sphere meshes with a depth buffer); orbit camera; click to select, drag to move in the ground plane (Shift: vertically), throw while running; Sphere/Box tools place on whatever is under the mouse; inspector; undo/redo, Play/Reset, Open/Save/Copy/Paste, examples
+- [x] `tests/physics3d.rs`, against closed-form answers (120 Hz):
+
+  | Test | Expected | Measured |
+  | --- | --- | --- |
+  | Elastic head-on, equal spheres | velocities swap | exact to 1e-8 |
+  | Block on 35° ramp, μ = 0.5, 1 s | ½ g (sin θ − μ cos θ) t² = 0.804 m | 0.798 m |
+  | Block on 20° ramp, μ = 0.5 | holds (tan 20° = 0.36 < μ) | 0.7 mm creep |
+  | Ball rolling down 20°, 1 s | ½ (5/7) g sin θ t² = 1.198 m, ω r = v | 1.187 m, ω r / v = 1.001 |
+  | Bounce from 3 m, e = 0.5 / 0.9 | e² h = 0.75 / 2.43 m | 0.751 / 2.485 m |
+  | 6-box tower, 5 s | stands, KE → 0 | drift 2 mm, KE < 1e-6 J |
+  | 30-cube pyramid, 5 s | holds | worst drift 0.7 mm |
+
+- [ ] Translate/rotate gizmos and multi-select (the 2D editor has them; 3D has drag-to-move and the inspector for now)
+- [ ] Shadows (they'd help judge depth)
+
+### M6b: 3D fluid
+
+- [ ] 3D SPH (CPU): cubic-spline kernel in 3D, 3D grid, boundary particles on box and sphere surfaces, water at 1000 kg/m³
+- [ ] Two-way coupling with 3D bodies (buoyancy, drag, torque)
+- [ ] GPU SPH in 3D (the M5 compute shaders with a 3D grid)
+- [ ] 3D particle rendering (instanced sphere impostors)
 
 ---
 

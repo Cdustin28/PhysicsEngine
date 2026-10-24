@@ -44,7 +44,8 @@ impl Scene {
     }
 
     pub fn to_json(&self) -> String {
-        serde_json::to_string_pretty(self).expect("scene serialization is infallible")
+        let pretty = serde_json::to_string_pretty(self).expect("scene serialization is infallible");
+        collapse_number_arrays(&pretty)
     }
 
     pub fn from_json(json: &str) -> Result<Self, SceneError> {
@@ -66,6 +67,55 @@ impl Scene {
         scene.world.assign_handles();
         Ok(scene)
     }
+}
+
+/// Same layout as 2D scene files (see `engine::scene`).
+/// Rewrite serde_json's pretty output so arrays whose elements are all
+/// numbers sit on one line:
+///
+/// ```text
+/// "position": [        ->   "position": [0.0, -0.25],
+///   0.0,
+///   -0.25
+/// ],
+/// ```
+fn collapse_number_arrays(pretty: &str) -> String {
+    let lines: Vec<&str> = pretty.lines().collect();
+    let mut out = String::with_capacity(pretty.len());
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
+        if line.trim_end().ends_with('[') {
+            // Look ahead for number-only elements up to the closing bracket.
+            let mut numbers = Vec::new();
+            let mut j = i + 1;
+            while j < lines.len() {
+                let t = lines[j].trim();
+                if t.starts_with(']') {
+                    break;
+                }
+                let value = t.trim_end_matches(',');
+                if value.parse::<f64>().is_err() {
+                    break;
+                }
+                numbers.push(value);
+                j += 1;
+            }
+            if j < lines.len() && !numbers.is_empty() && lines[j].trim().starts_with(']') {
+                out.push_str(line.trim_end());
+                out.push_str(&numbers.join(", "));
+                out.push_str(lines[j].trim());
+                out.push('\n');
+                i = j + 1;
+                continue;
+            }
+        }
+        out.push_str(line);
+        out.push('\n');
+        i += 1;
+    }
+    out.pop(); // match serde_json: no trailing newline
+    out
 }
 
 #[derive(Debug)]

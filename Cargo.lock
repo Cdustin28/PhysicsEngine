@@ -930,6 +930,7 @@ dependencies = [
  "bytemuck",
  "eframe",
  "engine",
+ "engine3d",
  "glam",
  "gpu",
  "js-sys",

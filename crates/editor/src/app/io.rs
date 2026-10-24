@@ -5,7 +5,7 @@
 //! is parked in a [`PendingFile`] and picked up on the next frame) and
 //! **Save…** downloads the scene as `scene.json`.
 
-use super::EditorApp;
+use super::{EditorApp, Mode};
 use eframe::egui;
 use engine::Scene;
 use std::sync::{Arc, Mutex};
@@ -14,13 +14,27 @@ use std::sync::{Arc, Mutex};
 pub(super) type PendingFile = Arc<Mutex<Option<(String, String)>>>;
 
 impl EditorApp {
+    /// The scene in the current editor, as JSON.
     pub(super) fn scene_json(&self) -> String {
-        Scene::from_world(&self.world).to_json()
+        match self.mode {
+            Mode::TwoD => Scene::from_world(&self.world).to_json(),
+            Mode::ThreeD => self.view3d.scene_json(),
+        }
     }
 
+    /// Load a 2D or 3D scene, switching to the matching editor.
     pub(super) fn load_scene_json(&mut self, json: &str, source: &str) -> bool {
+        if json.contains(&format!("\"{}\"", engine3d::Scene::FORMAT)) {
+            let ok = self.view3d.load_scene_json(json, source);
+            if ok {
+                self.set_mode(Mode::ThreeD);
+            }
+            self.take_3d_status();
+            return ok;
+        }
         match Scene::from_json(json) {
             Ok(scene) => {
+                self.set_mode(Mode::TwoD);
                 self.replace_world(scene.world);
                 self.status = format!("Loaded {source}.");
                 true
@@ -29,6 +43,13 @@ impl EditorApp {
                 self.status = format!("Could not load {source}: {e}");
                 false
             }
+        }
+    }
+
+    /// Show the 3D editor's latest message in the shared status bar.
+    pub(super) fn take_3d_status(&mut self) {
+        if !self.view3d.status.is_empty() {
+            self.status = std::mem::take(&mut self.view3d.status);
         }
     }
 

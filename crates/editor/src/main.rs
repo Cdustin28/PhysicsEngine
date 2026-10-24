@@ -5,6 +5,7 @@ mod app;
 mod camera;
 mod history;
 mod particles;
+mod view3d;
 
 use app::EditorApp;
 
@@ -15,6 +16,8 @@ fn main() -> eframe::Result {
             .with_title("PhysicsEngine")
             .with_inner_size([1280.0, 800.0])
             .with_min_inner_size([640.0, 400.0]),
+        // The 3D view needs a depth buffer (see `view3d/render.rs`).
+        depth_buffer: 24,
         ..Default::default()
     };
     eframe::run_native(
@@ -38,7 +41,10 @@ fn main() {
         let result = eframe::WebRunner::new()
             .start(
                 canvas,
-                eframe::WebOptions::default(),
+                eframe::WebOptions {
+                    depth_buffer: 24,
+                    ..Default::default()
+                },
                 Box::new(|cc| Ok(Box::new(EditorApp::new(cc)))),
             )
             .await;
