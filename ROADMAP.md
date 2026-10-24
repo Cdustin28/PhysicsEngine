@@ -99,20 +99,27 @@ These apply to every milestone.
 
 ---
 
-## M3: Two-way fluid ↔ rigid-body coupling
+## M3: Two-way fluid ↔ rigid-body coupling ✅
 
 **Goal:** fluid pushes bodies and bodies push fluid. Boxes float, sink, and get carried by currents.
 
-- [ ] Sample rigid-body surfaces with boundary particles that move with the body (Akinci et al. 2012, "Versatile Rigid-Fluid Coupling")
-- [ ] Fluid pressure on boundary particles → force and torque on the body
-- [ ] Body velocity → boundary particle velocity → drag on the fluid
-- [ ] Editor: show the buoyancy force vector on the selected body
-- [ ] **Tests (Archimedes):**
-  - a body with half the fluid's density floats about 50% submerged
-  - a body denser than the fluid sinks
-  - a uniform box floats level
+- [x] Rigid-body surfaces sampled with boundary particles that move with the body (Akinci et al. 2012). This landed in M2, where bodies already pushed fluid.
+- [x] Fluid pressure and wall viscosity on boundary particles → force and torque on the body. It's the exact reaction to the boundary force each fluid particle feels, accumulated over the fluid substeps and applied as an external force in the rigid-body step.
+- [x] Body velocity → boundary particle velocity → drag on the fluid
+- [x] **Boundary inset:** boundary particles sit 0.55 particle spacings inside each surface. Still water rests that far off a boundary layer (measured 0.59 at walls, 0.48 at the floor). Before the inset, every body acted about 3 cm too big and floated high (submerged 0.16/0.35/0.58 where 0.25/0.50/0.75 was expected).
+- [x] **Editor:** blue arrow from each body's center showing the fluid force (scaled so the body's weight would be 1 m, so a resting floater shows exactly 1 m); inspector shows force, force/weight, and torque; Buoyancy example
+- [x] **Tests** (`crates/engine/tests/coupling.rs`):
+  - boxes of density 2.5 / 5 / 7.5 float with 0.224 / 0.470 / 0.733 submerged (Archimedes: 0.25 / 0.50 / 0.75; the test allows ±0.08)
+  - a density-20 box sinks to the bottom
+  - sinking a box raises the water level by its area / tank width (0.112 m measured vs 0.100 m expected)
+  - a wide, light box dropped in tilted at 0.5 rad rights itself (0.05 rad)
+  - momentum is exchanged exactly between water and a coasting box (0.000% error over 0.5 s; the box slows from 2.0 to 1.0 m/s)
 
-**Done when:** you can drop a box into a tank and it bobs and settles at the waterline its density predicts.
+**Done when:** you can drop a box into a tank and it bobs and settles at the waterline its density predicts. ✅
+
+**Known limitation:** a sunk body rests on a film of water about one particle thick (4 cm at the default spacing) instead of touching the floor. A single layer of particles squeezed between two boundaries can't drain in SPH. It shows in the level-rise test as about +10%. Possible fixes are letting rigid contact see through a thin film, or a dedicated squeeze-out term.
+
+**Also tuned:** with the inset, fluid gets closer to walls, and hard dam-break impacts started hitting the speed cap again. Wall viscosity went from 0.3 to 0.5, which removed it; the dam-break front is unchanged.
 
 ---
 

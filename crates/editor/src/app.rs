@@ -144,6 +144,7 @@ pub struct EditorApp {
     /// Where a rectangle fill drag started.
     fluid_rect_start: Option<Vec2>,
     color_by: ColorBy,
+    show_fluid_forces: bool,
 
     /// Text of the "Paste scene JSON" window while it is open.
     paste_buffer: Option<String>,
@@ -173,6 +174,7 @@ impl EditorApp {
             brush_radius: 0.3,
             fluid_rect_start: None,
             color_by: ColorBy::Speed,
+            show_fluid_forces: true,
             paste_buffer: None,
             status: "Ready. Press Space to play.".into(),
             cursor_world: None,
@@ -560,6 +562,7 @@ impl EditorApp {
                 ui.label("Space: play/pause · . step · R reset");
                 ui.label("Delete: remove selected · D contact overlay");
                 ui.label("F fluid · E erase");
+                ui.label("Blue arrows: fluid force on a body (weight = 1 m)");
             });
         });
     }
@@ -667,6 +670,17 @@ impl EditorApp {
                 body.inertia(),
                 body.kinetic_energy()
             ));
+            let weight = body.mass() * engine::STANDARD_GRAVITY;
+            let (force, torque) = self.world.fluid_force(id);
+            if force != Vec2::ZERO || torque != 0.0 {
+                ui.weak(format!(
+                    "Fluid force ({:.1}, {:.1}) N = {:.2}× weight · torque {:.2} N·m",
+                    force.x,
+                    force.y,
+                    force.length() / weight,
+                    torque
+                ));
+            }
         }
         if ui.button("Delete").clicked() {
             delete = true;
@@ -815,6 +829,9 @@ impl EditorApp {
         }
         if self.show_contacts {
             self.draw_contacts(&painter, viewport);
+        }
+        if self.show_fluid_forces && !self.world.fluid.is_empty() {
+            self.draw_fluid_forces(&painter, viewport);
         }
         if self.tool == Tool::Select
             && let Some(body) = self.selected.and_then(|id| self.world.body(id))
@@ -1019,6 +1036,11 @@ impl EditorApp {
                     });
                     ui.end_row();
                 });
+                ui.checkbox(&mut self.show_fluid_forces, "Show forces on bodies")
+                    .on_hover_text(
+                        "An arrow from each body's center showing the fluid's push (buoyancy and drag), \
+                         drawn so the body's own weight would be 1 m long.",
+                    );
                 if !fluid.is_empty() {
                     ui.weak(format!(
                         "{} substeps per step · max compression {:.1}%",
@@ -1090,6 +1112,28 @@ impl EditorApp {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// An arrow from each dynamic body's center showing the fluid's force on
+    /// it, scaled so the body's own weight would be a 1 m arrow. A floating
+    /// body at rest shows an arrow exactly that long, pointing up.
+    fn draw_fluid_forces(&self, painter: &egui::Painter, viewport: Rect) {
+        for (i, body) in self.world.bodies.iter().enumerate() {
+            if body.is_static {
+                continue;
+            }
+            let (force, _) = self.world.fluid_force(BodyId(i));
+            if force == Vec2::ZERO {
+                continue;
+            }
+            let weight = body.mass() * engine::STANDARD_GRAVITY;
+            let meters = force / weight;
+            let from = self.camera.world_to_screen(viewport, body.position);
+            let to = self
+                .camera
+                .world_to_screen(viewport, body.position + meters);
+            painter.arrow(from, to - from, Stroke::new(2.5, WATER_DEEP));
         }
     }
 

@@ -29,6 +29,10 @@ pub struct World {
     /// impulses for warm starting. Not saved in scene files.
     #[serde(skip)]
     contacts: Vec<Manifold>,
+    /// Force (N) and torque (N·m) the fluid applied to each body during the
+    /// last step, averaged over the step. Not saved in scene files.
+    #[serde(skip)]
+    fluid_forces: Vec<(Vec2, f32)>,
 }
 
 impl Default for World {
@@ -47,6 +51,7 @@ impl World {
             solver: SolverSettings::default(),
             time: 0.0,
             contacts: Vec::new(),
+            fluid_forces: Vec::new(),
         }
     }
 
@@ -68,6 +73,7 @@ impl World {
         }
         // Cached contacts refer to bodies by index, so they're now wrong.
         self.contacts.clear();
+        self.fluid_forces.clear();
         Some(self.bodies.remove(id.0))
     }
 
@@ -86,6 +92,16 @@ impl World {
             .iter()
             .rposition(|b| b.contains_point(point))
             .map(BodyId)
+    }
+
+    /// Force (N) and torque (N·m) the fluid exerted on a body during the last
+    /// step: buoyancy, drag, and the push of moving water. Zero if the body
+    /// isn't touching fluid.
+    pub fn fluid_force(&self, id: BodyId) -> (Vec2, f32) {
+        self.fluid_forces
+            .get(id.0)
+            .copied()
+            .unwrap_or((Vec2::ZERO, 0.0))
     }
 
     /// Contacts from the most recent step, for debug drawing.
@@ -118,7 +134,9 @@ impl World {
     ///
     /// One step is:
     /// 0. **Fluid:** if there is any, advance it through its own substeps,
-    ///    with the bodies (at their current poses) as boundaries.
+    ///    with the bodies (at their current poses) as boundaries. The push
+    ///    the fluid gave each body becomes an external force on that body
+    ///    for the rest of the step (two-way coupling).
     /// 1. **Broad phase:** find pairs whose bounding boxes overlap.
     /// 2. **Narrow phase:** compute exact contact points for those pairs.
     /// 3. **Warm start bookkeeping:** carry impulses over from last step's
@@ -137,9 +155,23 @@ impl World {
         if !self.fluid.is_empty() {
             let p = self.fluid.params;
             let boundary = p.boundary(&self.bodies);
-            self.fluid.step(&boundary, self.gravity, dt);
+            let impulses = self
+                .fluid
+                .step(&boundary, self.gravity, dt, self.bodies.len());
             self.fluid.project_out_of_bodies(&self.bodies);
             self.fluid.remove_escaped();
+
+            self.fluid_forces.clear();
+            for (body, impulse) in self.bodies.iter_mut().zip(&impulses) {
+                let (force, torque) = (impulse.linear / dt, impulse.angular / dt);
+                if !body.is_static {
+                    body.apply_force(force);
+                    body.apply_torque(torque);
+                }
+                self.fluid_forces.push((force, torque));
+            }
+        } else {
+            self.fluid_forces.clear();
         }
 
         let mut contacts: Vec<Manifold> = broad_phase::sweep_and_prune_pairs(&self.bodies)

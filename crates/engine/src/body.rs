@@ -187,19 +187,32 @@ impl RigidBody {
         )
     }
 
-    /// Points spaced about `spacing` apart around the body's outline, in
-    /// world space. Used as the fluid's boundary particles.
-    pub fn sample_surface(&self, spacing: f32, out: &mut Vec<Vec2>) {
-        match self.shape {
+    /// Points spaced about `spacing` apart around the body's outline, moved
+    /// `inset` inward from the surface (but never more than halfway to the
+    /// center), in world space. Used as the fluid's boundary particles.
+    pub fn sample_surface(&self, spacing: f32, inset: f32, out: &mut Vec<Vec2>) {
+        let shape = match self.shape {
+            Shape::Circle { radius } => Shape::Circle {
+                radius: (radius - inset).max(0.5 * radius),
+            },
+            Shape::Box { half_extents: h } => Shape::Box {
+                half_extents: (h - Vec2::splat(inset)).max(0.5 * h),
+            },
+        };
+        let inner = RigidBody {
+            shape,
+            ..self.clone()
+        };
+        match inner.shape {
             Shape::Circle { radius } => {
                 let n = ((std::f32::consts::TAU * radius / spacing).ceil() as usize).max(8);
                 out.extend((0..n).map(|k| {
                     let a = std::f32::consts::TAU * k as f32 / n as f32;
-                    self.local_to_world(Vec2::from_angle(a) * radius)
+                    inner.local_to_world(Vec2::from_angle(a) * radius)
                 }));
             }
             Shape::Box { .. } => {
-                let corners = self.box_corners().expect("box has corners");
+                let corners = inner.box_corners().expect("box has corners");
                 for i in 0..4 {
                     let (a, b) = (corners[i], corners[(i + 1) % 4]);
                     let n = (((b - a).length() / spacing).ceil() as usize).max(1);
