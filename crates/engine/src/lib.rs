@@ -12,16 +12,31 @@
 //! # Coordinate frame
 //!
 //! +x points right, +y points up, positive angles rotate counter-clockwise.
+//!
+//! # Module map
+//!
+//! - [`shape`], [`body`]: geometry and rigid-body state
+//! - [`broad_phase`]: which pairs *might* touch (sort-and-sweep)
+//! - [`collision`]: exactly where they touch (contact manifolds)
+//! - [`solver`]: sequential impulses for contacts, friction, and restitution
+//! - [`world`]: owns the bodies and runs a step
+//! - [`scene`], [`presets`]: JSON scene files and built-in examples
 
 pub mod body;
+pub mod broad_phase;
+pub mod collision;
+pub mod presets;
 pub mod scene;
 pub mod shape;
+pub mod solver;
 pub mod world;
 
 pub use body::{BodyId, RigidBody};
+pub use collision::{ContactPoint, Manifold};
 pub use glam::Vec2;
 pub use scene::{Scene, SceneError};
 pub use shape::Shape;
+pub use solver::SolverSettings;
 pub use world::{FixedTimestep, World};
 
 /// Standard gravity at Earth's surface, m/s².

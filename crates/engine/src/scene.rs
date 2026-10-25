@@ -140,11 +140,34 @@ mod tests {
         assert!(matches!(err, SceneError::Invalid(_)), "{err}");
     }
 
+    /// The files in `scenes/` must match the presets they were generated
+    /// from. If this fails after changing a preset, regenerate them with
+    /// `cargo run -p engine --example make_scenes`.
     #[test]
-    fn example_scenes_load() {
-        let demo = include_str!("../../../scenes/demo.json");
-        let scene = Scene::from_json(demo).expect("scenes/demo.json should load");
-        assert_eq!(scene.world, World::demo());
+    fn example_scene_files_match_presets() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../scenes");
+        for (name, make) in crate::presets::ALL {
+            let path = format!("{dir}/{name}.json");
+            let json = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("{path}: {e}. Run the make_scenes example."));
+            let scene = Scene::from_json(&json).unwrap_or_else(|e| panic!("{path}: {e}"));
+            assert!(
+                scene.world == make(),
+                "{path} is out of date. Run `cargo run -p engine --example make_scenes`."
+            );
+        }
+    }
+
+    /// Scenes saved before the solver settings existed must still load.
+    #[test]
+    fn scene_without_solver_settings_uses_defaults() {
+        let json = r#"{
+            "format": "physicsengine-scene",
+            "version": 1,
+            "world": { "gravity": [0.0, -9.8], "bodies": [] }
+        }"#;
+        let scene = Scene::from_json(json).unwrap();
+        assert_eq!(scene.world.solver, crate::SolverSettings::default());
     }
 
     #[test]

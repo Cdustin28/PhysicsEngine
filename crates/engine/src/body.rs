@@ -190,19 +190,34 @@ impl RigidBody {
     /// Updating velocity *before* position is what makes this "semi-implicit".
     /// It is just as cheap as explicit Euler but does not gain energy over
     /// time, which keeps orbits and springs stable.
+    ///
+    /// `World::step` calls the two halves separately so the contact solver
+    /// can adjust velocities in between.
+    #[cfg(test)]
     pub(crate) fn integrate(&mut self, gravity: Vec2, dt: f32) {
+        self.integrate_velocity(gravity, dt);
+        self.integrate_position(dt);
+    }
+
+    /// First half of a step: apply gravity and accumulated forces to the
+    /// velocities, then clear the accumulators.
+    pub(crate) fn integrate_velocity(&mut self, gravity: Vec2, dt: f32) {
         if !self.is_static {
             let linear_accel = gravity + self.force * self.inverse_mass();
             let angular_accel = self.torque * self.inverse_inertia();
-
             self.velocity += linear_accel * dt;
             self.angular_velocity += angular_accel * dt;
-
-            self.position += self.velocity * dt;
-            self.angle += self.angular_velocity * dt;
         }
         self.force = Vec2::ZERO;
         self.torque = 0.0;
+    }
+
+    /// Second half of a step: move by the (now contact-corrected) velocity.
+    pub(crate) fn integrate_position(&mut self, dt: f32) {
+        if !self.is_static {
+            self.position += self.velocity * dt;
+            self.angle += self.angular_velocity * dt;
+        }
     }
 
     /// Check that the body's parameters are physically meaningful.

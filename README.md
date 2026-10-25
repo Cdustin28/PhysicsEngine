@@ -4,7 +4,7 @@ A 2D rigid-body and particle-fluid physics engine with an interactive editor, wr
 
 Website: [physicsengine.dev](https://physicsengine.dev) · Plan: [ROADMAP.md](ROADMAP.md)
 
-> **Status:** early (milestone M0). Bodies fall under gravity and can be placed, dragged, thrown, saved, and loaded. Collisions (M1) and SPH fluids (M2) are next.
+> **Status:** milestone M1. Rigid boxes and circles collide, stack, bounce, and slide with friction. SPH fluids (M2) are next.
 
 ## Running it
 
@@ -37,6 +37,7 @@ trunk serve --release   # then open http://127.0.0.1:8080
 | --- | --- |
 | Select / place | Left-click (tool chosen in the sidebar) |
 | Move a body | Left-drag with the Select tool. Release while playing to throw it. |
+| Rotate a body | Select it, then drag the gold handle |
 | Pan | Right- or middle-drag |
 | Zoom | Scroll wheel or pinch |
 | Play / pause | Space |
@@ -44,14 +45,16 @@ trunk serve --release   # then open http://127.0.0.1:8080
 | Reset to before Play | R |
 | Tools | V select · C circle · B box · Esc back to select |
 | Delete selected | Delete / Backspace |
+| Contact overlay | D, or the checkbox under World |
 
-Scenes save as human-readable JSON. **Save…/Open…** use file dialogs on desktop, and **Copy JSON/Paste JSON…** work everywhere. There's an example in [`scenes/demo.json`](scenes/demo.json).
+Scenes save as human-readable JSON. **Save…/Open…** use file dialogs on desktop, and **Copy JSON/Paste JSON…** work everywhere. **Examples** loads the built-in scenes (demo, 55-box pyramid, friction ramps, bouncing balls). The same scenes are in [`scenes/`](scenes); regenerate them with `cargo run -p engine --example make_scenes`.
 
 ## Layout
 
 ```
 crates/
-  engine/   physics only: shapes, bodies, world stepping, scene files. No GUI deps.
+  engine/   physics only: shapes, bodies, collision, contact solver, scenes. No GUI deps.
+    tests/physics.rs   validation tests against known answers
   editor/   eframe/egui app: canvas, tools, inspector. Builds native and wasm.
 scenes/     example scene files
 index.html  physicsengine.dev landing page (served by GitHub Pages)

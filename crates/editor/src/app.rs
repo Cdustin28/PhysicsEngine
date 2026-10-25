@@ -2,13 +2,20 @@
 
 use crate::camera::Camera;
 use eframe::egui::{self, Color32, Key, PointerButton, Pos2, Rect, Sense, Stroke, Ui};
-use engine::{BodyId, FixedTimestep, RigidBody, Scene, Shape, Vec2, World};
+use engine::{BodyId, FixedTimestep, RigidBody, Scene, Shape, Vec2, World, presets};
 
 /// Iowa State cardinal, used for dynamic bodies.
 const CARDINAL: Color32 = Color32::from_rgb(0xC8, 0x10, 0x2E);
 /// Iowa State gold, used for selection and previews.
 const GOLD: Color32 = Color32::from_rgb(0xF1, 0xBE, 0x48);
 const STATIC_FILL: Color32 = Color32::from_rgb(0x8A, 0x8D, 0x91);
+/// Contact points and normals in the debug overlay.
+const CONTACT_COLOR: Color32 = Color32::from_rgb(0x1F, 0x4E, 0x9A);
+
+/// Distance of the rotate handle beyond the body's bounding circle, px.
+const ROTATE_HANDLE_OFFSET_PX: f32 = 28.0;
+/// Radius of the rotate handle, px.
+const ROTATE_HANDLE_RADIUS_PX: f32 = 6.0;
 
 /// Fastest speed a "thrown" body can leave the mouse with, m/s. Keeps a
 /// flick of the mouse from launching a body into orbit.
@@ -66,12 +73,28 @@ impl NewBodySettings {
 }
 
 /// A body being dragged with the mouse.
-struct Drag {
-    id: BodyId,
-    /// Body position minus the grab point, so the body doesn't jump to put
-    /// its center under the cursor.
-    offset: Vec2,
-    prev_position: Vec2,
+enum Drag {
+    Move {
+        id: BodyId,
+        /// Body position minus the grab point, so the body doesn't jump to
+        /// put its center under the cursor.
+        offset: Vec2,
+        prev_position: Vec2,
+    },
+    Rotate {
+        id: BodyId,
+        /// Body angle minus the cursor's angle around the body's center at
+        /// the moment of grabbing, so the body doesn't snap.
+        offset: f32,
+    },
+}
+
+impl Drag {
+    fn id(&self) -> BodyId {
+        match *self {
+            Drag::Move { id, .. } | Drag::Rotate { id, .. } => id,
+        }
+    }
 }
 
 pub struct EditorApp {
@@ -89,6 +112,7 @@ pub struct EditorApp {
     new_body: NewBodySettings,
     selected: Option<BodyId>,
     drag: Option<Drag>,
+    show_contacts: bool,
 
     /// Text of the "Paste scene JSON" window while it is open.
     paste_buffer: Option<String>,
@@ -113,6 +137,7 @@ impl EditorApp {
             new_body: NewBodySettings::default(),
             selected: None,
             drag: None,
+            show_contacts: false,
             paste_buffer: None,
             status: "Ready. Press Space to play.".into(),
             cursor_world: None,
@@ -249,6 +274,9 @@ impl EditorApp {
         if pressed(Key::Delete) || pressed(Key::Backspace) {
             self.delete_selected();
         }
+        if pressed(Key::D) {
+            self.show_contacts = !self.show_contacts;
+        }
     }
 
     fn toolbar(&mut self, ui: &mut Ui) {
@@ -294,6 +322,21 @@ impl EditorApp {
                 ));
                 self.replace_world(world);
                 self.snapshot = None;
+            }
+            let mut chosen = None;
+            egui::ComboBox::from_id_salt("examples")
+                .selected_text("Examples")
+                .show_ui(ui, |ui| {
+                    for &(name, make) in presets::ALL {
+                        if ui.selectable_label(false, title_case(name)).clicked() {
+                            chosen = Some((name, make));
+                        }
+                    }
+                });
+            if let Some((name, make)) = chosen {
+                self.replace_world(make());
+                self.snapshot = None;
+                self.status = format!("Loaded the {name} example. Press Space to play.");
             }
             #[cfg(not(target_arch = "wasm32"))]
             {
@@ -387,6 +430,44 @@ impl EditorApp {
                 self.timestep.dt = 1.0 / hz as f32;
                 ui.end_row();
             });
+            ui.checkbox(&mut self.show_contacts, "Show contacts (D)");
+
+            ui.collapsing("Solver", |ui| {
+                let s = &mut self.world.solver;
+                egui::Grid::new("solver").num_columns(2).show(ui, |ui| {
+                    ui.label("Iterations");
+                    ui.add(egui::Slider::new(&mut s.velocity_iterations, 1..=50));
+                    ui.end_row();
+                    ui.label("Position fix")
+                        .on_hover_text("Fraction of overlap removed per step");
+                    ui.add(egui::Slider::new(&mut s.baumgarte, 0.0..=1.0));
+                    ui.end_row();
+                    ui.label("Slop")
+                        .on_hover_text("Overlap tolerated without correction");
+                    ui.add(
+                        egui::DragValue::new(&mut s.allowed_penetration)
+                            .speed(0.0005)
+                            .range(0.0..=0.1)
+                            .suffix(" m"),
+                    );
+                    ui.end_row();
+                    ui.label("Bounce threshold")
+                        .on_hover_text("Impacts slower than this don't bounce");
+                    ui.add(
+                        egui::DragValue::new(&mut s.restitution_threshold)
+                            .speed(0.05)
+                            .range(0.0..=10.0)
+                            .suffix(" m/s"),
+                    );
+                    ui.end_row();
+                    ui.label("Warm starting");
+                    ui.checkbox(&mut s.warm_starting, "");
+                    ui.end_row();
+                });
+                if ui.button("Reset to defaults").clicked() {
+                    *s = engine::SolverSettings::default();
+                }
+            });
 
             ui.separator();
             ui.heading("Selection");
@@ -405,10 +486,11 @@ impl EditorApp {
             ui.collapsing("Controls", |ui| {
                 ui.label("Left-click: select / place");
                 ui.label("Left-drag: move a body (release to throw while playing)");
+                ui.label("Drag the gold handle: rotate the selected body");
                 ui.label("Right- or middle-drag: pan");
                 ui.label("Scroll or pinch: zoom");
                 ui.label("Space: play/pause · . step · R reset");
-                ui.label("Delete: remove selected");
+                ui.label("Delete: remove selected · D contact overlay");
             });
         });
     }
@@ -517,7 +599,6 @@ impl EditorApp {
                 body.kinetic_energy()
             ));
         }
-        ui.weak("Restitution and friction take effect once collisions land (M1).");
         if ui.button("Delete").clicked() {
             delete = true;
         }
@@ -602,41 +683,26 @@ impl EditorApp {
             self.camera.pan_pixels(response.drag_delta());
         }
 
-        // --- Select tool: click to select, drag to move/throw.
+        // --- Select tool: click to select, drag to move/throw, drag the
+        // handle to rotate.
         if self.tool == Tool::Select {
             if response.drag_started_by(PointerButton::Primary) {
                 // Use where the button went down, not where the drag was
                 // recognized a few pixels later.
                 let origin = ui.input(|i| i.pointer.press_origin()).or(cursor_screen);
-                self.drag = origin
-                    .map(|p| self.camera.screen_to_world(viewport, p))
-                    .and_then(|grab| {
-                        let id = self.world.body_at_point(grab)?;
-                        let position = self.world.body(id)?.position;
-                        Some(Drag {
-                            id,
-                            offset: position - grab,
-                            prev_position: position,
-                        })
-                    });
-                self.selected = self.drag.as_ref().map(|d| d.id);
+                self.drag = origin.and_then(|press| self.start_drag(viewport, press));
+                if let Some(drag) = &self.drag {
+                    self.selected = Some(drag.id());
+                } else {
+                    self.selected = None;
+                }
             }
             if response.dragged_by(PointerButton::Primary)
-                && let (Some(drag), Some(pointer)) =
-                    (self.drag.as_mut(), response.interact_pointer_pos())
+                && let Some(pointer) = response.interact_pointer_pos()
             {
-                let target = self.camera.screen_to_world(viewport, pointer) + drag.offset;
+                let pointer = self.camera.screen_to_world(viewport, pointer);
                 let dt = ui.input(|i| i.stable_dt).max(1e-4);
-                if let Some(body) = self.world.body_mut(drag.id) {
-                    body.position = target;
-                    body.angular_velocity = 0.0;
-                    body.velocity = if self.running {
-                        ((target - drag.prev_position) / dt).clamp_length_max(MAX_THROW_SPEED)
-                    } else {
-                        Vec2::ZERO
-                    };
-                }
-                drag.prev_position = target;
+                self.continue_drag(pointer, dt);
             }
             if response.drag_stopped_by(PointerButton::Primary) {
                 self.drag = None;
@@ -658,8 +724,32 @@ impl EditorApp {
         self.draw_grid(&painter, viewport, visuals.weak_text_color());
 
         for (i, body) in self.world.bodies.iter().enumerate() {
-            let selected = self.selected == Some(BodyId(i));
-            self.draw_body(&painter, viewport, body, selected, None);
+            if self.selected != Some(BodyId(i)) {
+                self.draw_body(&painter, viewport, body, false, None);
+            }
+        }
+        // Draw the selected body last so its outline isn't hidden under its
+        // neighbors.
+        if let Some(body) = self.selected.and_then(|id| self.world.body(id)) {
+            self.draw_body(&painter, viewport, body, true, None);
+        }
+        if self.show_contacts {
+            self.draw_contacts(&painter, viewport);
+        }
+        if self.tool == Tool::Select
+            && let Some(body) = self.selected.and_then(|id| self.world.body(id))
+        {
+            let center = self.camera.world_to_screen(viewport, body.position);
+            let handle = self
+                .camera
+                .world_to_screen(viewport, self.rotate_handle(body));
+            painter.line_segment([center, handle], Stroke::new(1.5, GOLD));
+            painter.circle_filled(handle, ROTATE_HANDLE_RADIUS_PX, GOLD);
+            painter.circle_stroke(
+                handle,
+                ROTATE_HANDLE_RADIUS_PX,
+                Stroke::new(1.0, Color32::from_black_alpha(160)),
+            );
         }
 
         // Ghost preview of the object about to be placed.
@@ -679,6 +769,96 @@ impl EditorApp {
             ui.ctx().request_repaint();
         }
         cursor_world
+    }
+
+    /// World position of the rotate handle for `body`. It rotates with the
+    /// body so you can see which way is "up" for it.
+    fn rotate_handle(&self, body: &RigidBody) -> Vec2 {
+        let reach =
+            body.shape.bounding_radius() + ROTATE_HANDLE_OFFSET_PX / self.camera.pixels_per_meter;
+        body.local_to_world(Vec2::new(0.0, reach))
+    }
+
+    /// Decide what a left-drag starting at screen point `press` grabs: the
+    /// selected body's rotate handle, a body to move, or nothing.
+    fn start_drag(&self, viewport: Rect, press: Pos2) -> Option<Drag> {
+        if let Some(id) = self.selected
+            && let Some(body) = self.world.body(id)
+        {
+            let handle = self
+                .camera
+                .world_to_screen(viewport, self.rotate_handle(body));
+            if handle.distance(press) <= ROTATE_HANDLE_RADIUS_PX + 4.0 {
+                let grab = self.camera.screen_to_world(viewport, press) - body.position;
+                return Some(Drag::Rotate {
+                    id,
+                    offset: body.angle - grab.to_angle(),
+                });
+            }
+        }
+        let grab = self.camera.screen_to_world(viewport, press);
+        let id = self.world.body_at_point(grab)?;
+        let position = self.world.body(id)?.position;
+        Some(Drag::Move {
+            id,
+            offset: position - grab,
+            prev_position: position,
+        })
+    }
+
+    /// Apply an in-progress drag with the cursor at world point `pointer`.
+    fn continue_drag(&mut self, pointer: Vec2, dt: f32) {
+        let running = self.running;
+        match self.drag.as_mut() {
+            Some(Drag::Move {
+                id,
+                offset,
+                prev_position,
+            }) => {
+                let target = pointer + *offset;
+                if let Some(body) = self.world.body_mut(*id) {
+                    body.position = target;
+                    body.angular_velocity = 0.0;
+                    // While playing, the body leaves the mouse with the speed
+                    // it was dragged at, so you can throw things.
+                    body.velocity = if running {
+                        ((target - *prev_position) / dt).clamp_length_max(MAX_THROW_SPEED)
+                    } else {
+                        Vec2::ZERO
+                    };
+                }
+                *prev_position = target;
+            }
+            Some(Drag::Rotate { id, offset }) => {
+                if let Some(body) = self.world.body_mut(*id) {
+                    let to_cursor = pointer - body.position;
+                    if to_cursor.length_squared() > 1e-8 {
+                        body.angle = to_cursor.to_angle() + *offset;
+                    }
+                    // Hold it still while rotating so it doesn't fall away.
+                    body.velocity = Vec2::ZERO;
+                    body.angular_velocity = 0.0;
+                }
+            }
+            None => {}
+        }
+    }
+
+    /// Debug overlay: a dot at each contact point and a short line along the
+    /// contact normal (pointing from body A toward body B).
+    fn draw_contacts(&self, painter: &egui::Painter, viewport: Rect) {
+        let normal_px = 18.0;
+        for m in self.world.contacts() {
+            for p in &m.points {
+                let at = self.camera.world_to_screen(viewport, p.position);
+                let tip = self.camera.world_to_screen(
+                    viewport,
+                    p.position + m.normal * (normal_px / self.camera.pixels_per_meter),
+                );
+                painter.line_segment([at, tip], Stroke::new(2.0, CONTACT_COLOR));
+                painter.circle_filled(at, 3.5, CONTACT_COLOR);
+            }
+        }
     }
 
     fn draw_grid(&self, painter: &egui::Painter, viewport: Rect, color: Color32) {
@@ -764,6 +944,15 @@ impl EditorApp {
             }
         }
     }
+}
+
+/// "pyramid" -> "Pyramid".
+fn title_case(s: &str) -> String {
+    let mut chars = s.chars();
+    chars
+        .next()
+        .map(|c| c.to_uppercase().chain(chars).collect())
+        .unwrap_or_default()
 }
 
 /// A labeled DragValue for a positive length in meters.
