@@ -26,7 +26,32 @@ enum Tool {
     Select,
     Circle,
     Box,
+    /// Add fluid: drag a rectangle, or paint with a brush.
+    Fluid,
+    /// Remove fluid particles under the brush.
+    Erase,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FluidShape {
+    Rectangle,
+    Brush,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ColorBy {
+    Speed,
+    Pressure,
+}
+
+/// Fluid particle colors: deep blue at rest shading to pale blue when fast
+/// (or highly pressurized).
+const WATER_DEEP: Color32 = Color32::from_rgb(0x1F, 0x4E, 0x9A);
+const WATER_LIGHT: Color32 = Color32::from_rgb(0xA8, 0xDD, 0xF7);
+/// Speed shown at full brightness, m/s.
+const SPEED_COLOR_SCALE: f32 = 3.0;
+/// Depth of water whose hydrostatic pressure is shown at full brightness, m.
+const PRESSURE_COLOR_DEPTH: f32 = 2.0;
 
 /// Parameters for the next object placed with the Circle or Box tool.
 struct NewBodySettings {
@@ -52,7 +77,7 @@ impl Default for NewBodySettings {
 impl NewBodySettings {
     fn shape(&self, tool: Tool) -> Option<Shape> {
         match tool {
-            Tool::Select => None,
+            Tool::Select | Tool::Fluid | Tool::Erase => None,
             Tool::Circle => Some(Shape::Circle {
                 radius: self.radius,
             }),
@@ -113,6 +138,12 @@ pub struct EditorApp {
     selected: Option<BodyId>,
     drag: Option<Drag>,
     show_contacts: bool,
+    fluid_shape: FluidShape,
+    /// Radius of the fluid brush and the eraser, m.
+    brush_radius: f32,
+    /// Where a rectangle fill drag started.
+    fluid_rect_start: Option<Vec2>,
+    color_by: ColorBy,
 
     /// Text of the "Paste scene JSON" window while it is open.
     paste_buffer: Option<String>,
@@ -138,6 +169,10 @@ impl EditorApp {
             selected: None,
             drag: None,
             show_contacts: false,
+            fluid_shape: FluidShape::Rectangle,
+            brush_radius: 0.3,
+            fluid_rect_start: None,
+            color_by: ColorBy::Speed,
             paste_buffer: None,
             status: "Ready. Press Space to play.".into(),
             cursor_world: None,
@@ -271,6 +306,12 @@ impl EditorApp {
         if pressed(Key::B) {
             self.tool = Tool::Box;
         }
+        if pressed(Key::F) {
+            self.tool = Tool::Fluid;
+        }
+        if pressed(Key::E) {
+            self.tool = Tool::Erase;
+        }
         if pressed(Key::Delete) || pressed(Key::Backspace) {
             self.delete_selected();
         }
@@ -369,8 +410,32 @@ impl EditorApp {
                 ui.selectable_value(&mut self.tool, Tool::Circle, "Circle (C)");
                 ui.selectable_value(&mut self.tool, Tool::Box, "Box (B)");
             });
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut self.tool, Tool::Fluid, "Fluid (F)");
+                ui.selectable_value(&mut self.tool, Tool::Erase, "Erase (E)");
+            });
 
-            if self.tool != Tool::Select {
+            if self.tool == Tool::Fluid {
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut self.fluid_shape, FluidShape::Rectangle, "Rectangle");
+                    ui.selectable_value(&mut self.fluid_shape, FluidShape::Brush, "Brush");
+                });
+                if self.fluid_shape == FluidShape::Brush {
+                    egui::Grid::new("brush").num_columns(2).show(ui, |ui| {
+                        length_row(ui, "Brush radius", &mut self.brush_radius);
+                    });
+                    ui.weak("Drag on the canvas to paint water.");
+                } else {
+                    ui.weak("Drag a rectangle on the canvas to fill it with water.");
+                }
+            } else if self.tool == Tool::Erase {
+                ui.add_space(6.0);
+                egui::Grid::new("eraser").num_columns(2).show(ui, |ui| {
+                    length_row(ui, "Eraser radius", &mut self.brush_radius);
+                });
+                ui.weak("Drag over water to remove it.");
+            } else if self.tool != Tool::Select {
                 ui.add_space(6.0);
                 ui.label(egui::RichText::new("New object").strong());
                 let nb = &mut self.new_body;
@@ -470,6 +535,9 @@ impl EditorApp {
             });
 
             ui.separator();
+            self.fluid_panel(ui);
+
+            ui.separator();
             ui.heading("Selection");
             match self.selected {
                 Some(id) if self.world.body(id).is_some() => {
@@ -491,6 +559,7 @@ impl EditorApp {
                 ui.label("Scroll or pinch: zoom");
                 ui.label("Space: play/pause · . step · R reset");
                 ui.label("Delete: remove selected · D contact overlay");
+                ui.label("F fluid · E erase");
             });
         });
     }
@@ -612,6 +681,14 @@ impl EditorApp {
             ui.label(format!("t = {:.2} s", self.world.time));
             ui.separator();
             ui.label(format!("{} bodies", self.world.bodies.len()));
+            if !self.world.fluid.is_empty() {
+                ui.separator();
+                ui.label(format!(
+                    "{} particles · {} substeps",
+                    self.world.fluid.len(),
+                    self.world.fluid.stats.substeps
+                ));
+            }
             ui.separator();
             ui.label(format!("KE {:.2} J", self.world.kinetic_energy()));
             ui.separator();
@@ -710,6 +787,8 @@ impl EditorApp {
             if response.clicked_by(PointerButton::Primary) {
                 self.selected = cursor_world.and_then(|p| self.world.body_at_point(p));
             }
+        } else if self.tool == Tool::Fluid || self.tool == Tool::Erase {
+            self.fluid_tool_input(ui, &response, viewport);
         } else if response.clicked_by(PointerButton::Primary)
             && let Some(p) = cursor_world
             && let Some(body) = self.new_body.build(self.tool, p)
@@ -722,6 +801,7 @@ impl EditorApp {
         let visuals = ui.visuals();
         painter.rect_filled(viewport, 0.0, visuals.extreme_bg_color);
         self.draw_grid(&painter, viewport, visuals.weak_text_color());
+        self.draw_fluid(&painter, viewport);
 
         for (i, body) in self.world.bodies.iter().enumerate() {
             if self.selected != Some(BodyId(i)) {
@@ -751,6 +831,8 @@ impl EditorApp {
                 Stroke::new(1.0, Color32::from_black_alpha(160)),
             );
         }
+
+        self.draw_fluid_tool_preview(&painter, viewport, cursor_world);
 
         // Ghost preview of the object about to be placed.
         if let Some(p) = cursor_world
@@ -841,6 +923,173 @@ impl EditorApp {
                 }
             }
             None => {}
+        }
+    }
+
+    /// Mouse handling for the Fluid and Erase tools.
+    fn fluid_tool_input(&mut self, ui: &Ui, response: &egui::Response, viewport: Rect) {
+        let to_world = |p: Pos2| self.camera.screen_to_world(viewport, p);
+        let pointer = response.interact_pointer_pos().map(to_world);
+        let painting = response.dragged_by(PointerButton::Primary)
+            || response.clicked_by(PointerButton::Primary);
+
+        match (self.tool, self.fluid_shape) {
+            (Tool::Fluid, FluidShape::Rectangle) => {
+                if response.drag_started_by(PointerButton::Primary) {
+                    self.fluid_rect_start = ui.input(|i| i.pointer.press_origin()).map(to_world);
+                }
+                if response.drag_stopped_by(PointerButton::Primary)
+                    && let (Some(a), Some(b)) = (self.fluid_rect_start.take(), pointer)
+                {
+                    let added = self.world.fluid.fill_rect(a, b, &self.world.bodies);
+                    self.status = format!("Added {added} particles.");
+                }
+            }
+            (Tool::Fluid, FluidShape::Brush) => {
+                if painting && let Some(p) = pointer {
+                    self.world
+                        .fluid
+                        .fill_disc(p, self.brush_radius, &self.world.bodies);
+                }
+            }
+            (Tool::Erase, _) => {
+                if painting && let Some(p) = pointer {
+                    self.world.fluid.remove_disc(p, self.brush_radius);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn fluid_panel(&mut self, ui: &mut Ui) {
+        let fluid = &mut self.world.fluid;
+        let header = if fluid.is_empty() {
+            "Fluid".to_owned()
+        } else {
+            format!("Fluid ({} particles)", fluid.len())
+        };
+        egui::CollapsingHeader::new(header)
+            .id_salt("fluid_panel")
+            .default_open(true)
+            .show(ui, |ui| {
+                let empty = fluid.is_empty();
+                let p = &mut fluid.params;
+                egui::Grid::new("fluid").num_columns(2).show(ui, |ui| {
+                    ui.label("Spacing").on_hover_text(
+                        "Distance between particles. Can only change while there is no fluid, \
+                         since every particle's mass depends on it.",
+                    );
+                    ui.add_enabled(
+                        empty,
+                        egui::DragValue::new(&mut p.particle_spacing)
+                            .speed(0.001)
+                            .range(0.01..=0.5)
+                            .suffix(" m"),
+                    );
+                    ui.end_row();
+                    ui.label("Density")
+                        .on_hover_text("Rest density. Water is 10 kg/m² (1000 kg/m³ × 1 cm).");
+                    ui.add(
+                        egui::DragValue::new(&mut p.rest_density)
+                            .speed(0.1)
+                            .range(0.1..=1000.0)
+                            .suffix(" kg/m²"),
+                    );
+                    ui.end_row();
+                    ui.label("Stiffness").on_hover_text(
+                        "Numerical speed of sound. Higher compresses less but needs more substeps.",
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut p.speed_of_sound)
+                            .speed(0.5)
+                            .range(5.0..=100.0)
+                            .suffix(" m/s"),
+                    );
+                    ui.end_row();
+                    ui.label("Viscosity");
+                    ui.add(egui::Slider::new(&mut p.viscosity, 0.0..=1.0).logarithmic(true));
+                    ui.end_row();
+                    ui.label("Wall friction");
+                    ui.add(egui::Slider::new(&mut p.wall_viscosity, 0.0..=2.0).logarithmic(true));
+                    ui.end_row();
+                    ui.label("Color by");
+                    ui.horizontal(|ui| {
+                        ui.selectable_value(&mut self.color_by, ColorBy::Speed, "Speed");
+                        ui.selectable_value(&mut self.color_by, ColorBy::Pressure, "Pressure");
+                    });
+                    ui.end_row();
+                });
+                if !fluid.is_empty() {
+                    ui.weak(format!(
+                        "{} substeps per step · max compression {:.1}%",
+                        fluid.stats.substeps,
+                        fluid.stats.max_compression * 100.0
+                    ));
+                    if ui.button("Clear fluid").clicked() {
+                        fluid.clear();
+                    }
+                }
+            });
+    }
+
+    fn draw_fluid(&self, painter: &egui::Painter, viewport: Rect) {
+        let fluid = &self.world.fluid;
+        if fluid.is_empty() {
+            return;
+        }
+        let radius = (self.camera.scale(fluid.params.particle_spacing) * 0.6).max(1.5);
+        let pressures = fluid.pressures();
+        let full_pressure =
+            fluid.params.rest_density * engine::STANDARD_GRAVITY * PRESSURE_COLOR_DEPTH;
+        let visible = viewport.expand(radius);
+        for (i, &p) in fluid.positions.iter().enumerate() {
+            let at = self.camera.world_to_screen(viewport, p);
+            if !visible.contains(at) {
+                continue;
+            }
+            let t = match self.color_by {
+                ColorBy::Speed => {
+                    fluid.velocities.get(i).map_or(0.0, |v| v.length()) / SPEED_COLOR_SCALE
+                }
+                ColorBy::Pressure => pressures.get(i).map_or(0.0, |&q| q / full_pressure),
+            };
+            painter.circle_filled(
+                at,
+                radius,
+                lerp_color(WATER_DEEP, WATER_LIGHT, t.clamp(0.0, 1.0)),
+            );
+        }
+    }
+
+    fn draw_fluid_tool_preview(
+        &self,
+        painter: &egui::Painter,
+        viewport: Rect,
+        cursor: Option<Vec2>,
+    ) {
+        let stroke = Stroke::new(1.5, WATER_DEEP);
+        match (self.tool, self.fluid_shape) {
+            (Tool::Fluid, FluidShape::Rectangle) => {
+                if let (Some(a), Some(b)) = (self.fluid_rect_start, cursor) {
+                    let rect = Rect::from_two_pos(
+                        self.camera.world_to_screen(viewport, a),
+                        self.camera.world_to_screen(viewport, b),
+                    );
+                    painter.rect_filled(rect, 0.0, WATER_LIGHT.gamma_multiply(0.35));
+                    painter.rect_stroke(rect, 0.0, stroke, egui::StrokeKind::Middle);
+                }
+            }
+            (Tool::Fluid, FluidShape::Brush) | (Tool::Erase, _) => {
+                if let Some(c) = cursor {
+                    let at = self.camera.world_to_screen(viewport, c);
+                    let r = self.camera.scale(self.brush_radius);
+                    if self.tool == Tool::Fluid {
+                        painter.circle_filled(at, r, WATER_LIGHT.gamma_multiply(0.3));
+                    }
+                    painter.circle_stroke(at, r, stroke);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -946,13 +1195,19 @@ impl EditorApp {
     }
 }
 
-/// "pyramid" -> "Pyramid".
+fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
+    let mix = |x: u8, y: u8| (f32::from(x) + (f32::from(y) - f32::from(x)) * t).round() as u8;
+    Color32::from_rgb(mix(a.r(), b.r()), mix(a.g(), b.g()), mix(a.b(), b.b()))
+}
+
+/// "pyramid" -> "Pyramid", "dam_break" -> "Dam break".
 fn title_case(s: &str) -> String {
     let mut chars = s.chars();
     chars
         .next()
-        .map(|c| c.to_uppercase().chain(chars).collect())
+        .map(|c| c.to_uppercase().chain(chars).collect::<String>())
         .unwrap_or_default()
+        .replace('_', " ")
 }
 
 /// A labeled DragValue for a positive length in meters.

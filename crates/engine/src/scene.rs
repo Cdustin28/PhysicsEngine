@@ -5,7 +5,7 @@
 //! ```json
 //! {
 //!   "format": "physicsengine-scene",
-//!   "version": 1,
+//!   "version": 2,
 //!   "world": {
 //!     "gravity": [0.0, -9.80665],
 //!     "bodies": [
@@ -20,14 +20,32 @@
 //!         "friction": 0.5,
 //!         "is_static": false
 //!       }
-//!     ]
+//!     ],
+//!     "fluid": {
+//!       "params": { "particle_spacing": 0.05, "rest_density": 10.0, ... },
+//!       "positions": [
+//!         [0.025, 0.025],
+//!         [0.075, 0.025]
+//!       ]
+//!     },
+//!     "solver": { "velocity_iterations": 10, ... }
 //!   }
 //! }
 //! ```
 //!
+//! `fluid` and `solver` are optional; fluid velocities are left out when
+//! every particle is at rest.
+//!
 //! All values are SI units (see the crate docs). Bump [`Scene::VERSION`]
 //! whenever the format changes incompatibly, and add a migration in
 //! [`Scene::from_json`] so old files keep loading.
+//!
+//! # Version history
+//!
+//! - **1:** bodies, gravity, and (optional) solver settings.
+//! - **2:** adds the optional `fluid`. Version 1 files load unchanged; a
+//!   version 1 build would silently drop the fluid from a version 2 file,
+//!   which is why the version was bumped.
 
 use crate::world::World;
 use serde::{Deserialize, Serialize};
@@ -42,7 +60,9 @@ pub struct Scene {
 
 impl Scene {
     pub const FORMAT: &'static str = "physicsengine-scene";
-    pub const VERSION: u32 = 1;
+    pub const VERSION: u32 = 2;
+    /// Oldest version this build can read.
+    pub const OLDEST_SUPPORTED: u32 = 1;
 
     pub fn from_world(world: &World) -> Self {
         Self {
@@ -52,10 +72,13 @@ impl Scene {
         }
     }
 
-    /// Pretty-printed JSON, suitable for committing to git or editing by hand.
+    /// Pretty-printed JSON, suitable for committing to git or editing by
+    /// hand. Short arrays of numbers (vectors) stay on one line, so a fluid
+    /// with thousands of particles is one line per particle, not four.
     pub fn to_json(&self) -> String {
         // Serializing plain data with no maps keyed by non-strings can't fail.
-        serde_json::to_string_pretty(self).expect("scene serialization is infallible")
+        let pretty = serde_json::to_string_pretty(self).expect("scene serialization is infallible");
+        collapse_number_arrays(&pretty)
     }
 
     /// Parse and validate a scene file.
@@ -64,9 +87,13 @@ impl Scene {
         if scene.format != Self::FORMAT {
             return Err(SceneError::WrongFormat(scene.format));
         }
-        if scene.version != Self::VERSION {
+        if !(Self::OLDEST_SUPPORTED..=Self::VERSION).contains(&scene.version) {
             return Err(SceneError::UnsupportedVersion(scene.version));
         }
+        // Migrations from older versions go here. 1 -> 2 needs none: a
+        // version 1 file simply has no fluid.
+        let mut scene = scene;
+        scene.version = Self::VERSION;
         if !scene.world.gravity.is_finite() {
             return Err(SceneError::Invalid("gravity must be finite".into()));
         }
@@ -74,8 +101,58 @@ impl Scene {
             body.validate()
                 .map_err(|e| SceneError::Invalid(format!("body {i}: {e}")))?;
         }
+        scene.world.fluid.validate().map_err(SceneError::Invalid)?;
+        scene.world.fluid.fill_missing_velocities();
         Ok(scene)
     }
+}
+
+/// Rewrite serde_json's pretty output so arrays whose elements are all
+/// numbers sit on one line:
+///
+/// ```text
+/// "position": [        ->   "position": [0.0, -0.25],
+///   0.0,
+///   -0.25
+/// ],
+/// ```
+fn collapse_number_arrays(pretty: &str) -> String {
+    let lines: Vec<&str> = pretty.lines().collect();
+    let mut out = String::with_capacity(pretty.len());
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
+        if line.trim_end().ends_with('[') {
+            // Look ahead for number-only elements up to the closing bracket.
+            let mut numbers = Vec::new();
+            let mut j = i + 1;
+            while j < lines.len() {
+                let t = lines[j].trim();
+                if t.starts_with(']') {
+                    break;
+                }
+                let value = t.trim_end_matches(',');
+                if value.parse::<f64>().is_err() {
+                    break;
+                }
+                numbers.push(value);
+                j += 1;
+            }
+            if j < lines.len() && !numbers.is_empty() && lines[j].trim().starts_with(']') {
+                out.push_str(line.trim_end());
+                out.push_str(&numbers.join(", "));
+                out.push_str(lines[j].trim());
+                out.push('\n');
+                i = j + 1;
+                continue;
+            }
+        }
+        out.push_str(line);
+        out.push('\n');
+        i += 1;
+    }
+    out.pop(); // match serde_json: no trailing newline
+    out
 }
 
 #[derive(Debug)]
@@ -95,7 +172,8 @@ impl fmt::Display for SceneError {
             }
             SceneError::UnsupportedVersion(v) => write!(
                 f,
-                "scene version {v} is not supported (this build reads version {})",
+                "scene version {v} is not supported (this build reads versions {} to {})",
+                Scene::OLDEST_SUPPORTED,
                 Scene::VERSION
             ),
             SceneError::Invalid(msg) => write!(f, "invalid scene: {msg}"),
@@ -158,16 +236,64 @@ mod tests {
         }
     }
 
-    /// Scenes saved before the solver settings existed must still load.
+    /// Version 1 scenes (no fluid, maybe no solver settings) must still load.
     #[test]
-    fn scene_without_solver_settings_uses_defaults() {
+    fn version_1_scene_loads() {
         let json = r#"{
             "format": "physicsengine-scene",
             "version": 1,
             "world": { "gravity": [0.0, -9.8], "bodies": [] }
         }"#;
         let scene = Scene::from_json(json).unwrap();
+        assert_eq!(scene.version, Scene::VERSION);
         assert_eq!(scene.world.solver, crate::SolverSettings::default());
+        assert!(scene.world.fluid.is_empty());
+    }
+
+    #[test]
+    fn fluid_round_trips_and_resting_velocities_are_omitted() {
+        let mut world = World::new();
+        world
+            .fluid
+            .fill_rect(crate::Vec2::ZERO, crate::Vec2::new(0.2, 0.1), &[]);
+        let json = Scene::from_world(&world).to_json();
+        assert!(
+            !json.contains("velocities"),
+            "resting fluid should omit velocities"
+        );
+        assert!(
+            json.contains("[0.025, 0.025]"),
+            "vectors should be on one line:\n{json}"
+        );
+        let loaded = Scene::from_json(&json).unwrap();
+        assert_eq!(loaded.world, world);
+        assert_eq!(
+            loaded.world.fluid.velocities.len(),
+            loaded.world.fluid.len()
+        );
+
+        world.fluid.velocities[3] = crate::Vec2::new(1.0, 2.0);
+        let json = Scene::from_world(&world).to_json();
+        assert!(json.contains("velocities"));
+        assert_eq!(Scene::from_json(&json).unwrap().world, world);
+    }
+
+    #[test]
+    fn mismatched_fluid_arrays_are_rejected() {
+        let mut world = World::new();
+        world
+            .fluid
+            .fill_rect(crate::Vec2::ZERO, crate::Vec2::new(0.2, 0.1), &[]);
+        world.fluid.velocities = vec![crate::Vec2::ONE; 2];
+        let err = Scene::from_json(&Scene::from_world(&world).to_json()).unwrap_err();
+        assert!(matches!(err, SceneError::Invalid(_)), "{err}");
+    }
+
+    #[test]
+    fn number_arrays_collapse_but_nested_arrays_do_not() {
+        let input = "{\n  \"a\": [\n    1.0,\n    -2.5\n  ],\n  \"b\": [\n    [\n      1.0,\n      2.0\n    ]\n  ]\n}";
+        let expected = "{\n  \"a\": [1.0, -2.5],\n  \"b\": [\n    [1.0, 2.0]\n  ]\n}";
+        assert_eq!(collapse_number_arrays(input), expected);
     }
 
     #[test]

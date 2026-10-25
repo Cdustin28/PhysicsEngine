@@ -15,6 +15,7 @@ pub const ALL: &[Preset] = &[
     ("pyramid", pyramid),
     ("ramp", ramp),
     ("bounce", bounce),
+    ("dam_break", dam_break),
 ];
 
 /// A 20 m static floor whose top surface is at y = 0.
@@ -93,6 +94,34 @@ pub fn bounce() -> World {
         ball.restitution = e;
         w.add_body(ball);
     }
+    w
+}
+
+/// A water tank: floor and two walls, `width` m wide inside, walls
+/// `wall_height` m tall. The inside floor is at y = 0, centered on x = 0.
+pub fn tank(width: f32, wall_height: f32) -> World {
+    let mut w = World::new();
+    let t = 0.2; // wall thickness
+    w.add_body(RigidBody::new_static(
+        Shape::rect(width + 2.0 * t, t),
+        Vec2::new(0.0, -0.5 * t),
+    ));
+    for side in [-1.0, 1.0] {
+        w.add_body(RigidBody::new_static(
+            Shape::rect(t, wall_height),
+            Vec2::new(side * 0.5 * (width + t), 0.5 * wall_height),
+        ));
+    }
+    w
+}
+
+/// The classic dam break: a 2 m × 2 m column of water released at one end
+/// of a 6 m tank (about 1,500 particles at the default spacing).
+pub fn dam_break() -> World {
+    let mut w = tank(6.0, 3.0);
+    let bodies = w.bodies.clone();
+    w.fluid
+        .fill_rect(Vec2::new(-3.0, 0.0), Vec2::new(-1.0, 2.0), &bodies);
     w
 }
 

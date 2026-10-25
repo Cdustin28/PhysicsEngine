@@ -1,29 +1,17 @@
 {
   "format": "physicsengine-scene",
-  "version": 1,
+  "version": 2,
   "world": {
-    "gravity": [
-      0.0,
-      -9.80665
-    ],
+    "gravity": [0.0, -9.80665],
     "bodies": [
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            10.0,
-            0.25
-          ]
+          "half_extents": [10.0, 0.25]
         },
-        "position": [
-          0.0,
-          -0.25
-        ],
+        "position": [0.0, -0.25],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -33,20 +21,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          -2.25,
-          0.25
-        ],
+        "position": [-2.25, 0.25],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -56,20 +35,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          -1.75,
-          0.25
-        ],
+        "position": [-1.75, 0.25],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -79,20 +49,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          -1.25,
-          0.25
-        ],
+        "position": [-1.25, 0.25],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -102,20 +63,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          -0.75,
-          0.25
-        ],
+        "position": [-0.75, 0.25],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -125,20 +77,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          -0.25,
-          0.25
-        ],
+        "position": [-0.25, 0.25],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -148,20 +91,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          0.25,
-          0.25
-        ],
+        "position": [0.25, 0.25],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -171,20 +105,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          0.75,
-          0.25
-        ],
+        "position": [0.75, 0.25],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -194,20 +119,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          1.25,
-          0.25
-        ],
+        "position": [1.25, 0.25],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -217,20 +133,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          1.75,
-          0.25
-        ],
+        "position": [1.75, 0.25],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -240,20 +147,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          2.25,
-          0.25
-        ],
+        "position": [2.25, 0.25],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -263,20 +161,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          -2.0,
-          0.75
-        ],
+        "position": [-2.0, 0.75],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -286,20 +175,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          -1.5,
-          0.75
-        ],
+        "position": [-1.5, 0.75],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -309,20 +189,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          -1.0,
-          0.75
-        ],
+        "position": [-1.0, 0.75],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -332,20 +203,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          -0.5,
-          0.75
-        ],
+        "position": [-0.5, 0.75],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -355,20 +217,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          0.0,
-          0.75
-        ],
+        "position": [0.0, 0.75],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -378,20 +231,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          0.5,
-          0.75
-        ],
+        "position": [0.5, 0.75],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -401,20 +245,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          1.0,
-          0.75
-        ],
+        "position": [1.0, 0.75],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -424,20 +259,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          1.5,
-          0.75
-        ],
+        "position": [1.5, 0.75],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -447,20 +273,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          2.0,
-          0.75
-        ],
+        "position": [2.0, 0.75],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -470,20 +287,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          -1.75,
-          1.25
-        ],
+        "position": [-1.75, 1.25],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -493,20 +301,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          -1.25,
-          1.25
-        ],
+        "position": [-1.25, 1.25],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -516,20 +315,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          -0.75,
-          1.25
-        ],
+        "position": [-0.75, 1.25],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -539,20 +329,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          -0.25,
-          1.25
-        ],
+        "position": [-0.25, 1.25],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -562,20 +343,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          0.25,
-          1.25
-        ],
+        "position": [0.25, 1.25],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -585,20 +357,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          0.75,
-          1.25
-        ],
+        "position": [0.75, 1.25],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -608,20 +371,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          1.25,
-          1.25
-        ],
+        "position": [1.25, 1.25],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -631,20 +385,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          1.75,
-          1.25
-        ],
+        "position": [1.75, 1.25],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -654,20 +399,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          -1.5,
-          1.75
-        ],
+        "position": [-1.5, 1.75],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -677,20 +413,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          -1.0,
-          1.75
-        ],
+        "position": [-1.0, 1.75],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -700,20 +427,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          -0.5,
-          1.75
-        ],
+        "position": [-0.5, 1.75],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -723,20 +441,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          0.0,
-          1.75
-        ],
+        "position": [0.0, 1.75],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -746,20 +455,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          0.5,
-          1.75
-        ],
+        "position": [0.5, 1.75],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -769,20 +469,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          1.0,
-          1.75
-        ],
+        "position": [1.0, 1.75],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -792,20 +483,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          1.5,
-          1.75
-        ],
+        "position": [1.5, 1.75],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -815,20 +497,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          -1.25,
-          2.25
-        ],
+        "position": [-1.25, 2.25],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -838,20 +511,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          -0.75,
-          2.25
-        ],
+        "position": [-0.75, 2.25],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -861,20 +525,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          -0.25,
-          2.25
-        ],
+        "position": [-0.25, 2.25],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -884,20 +539,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          0.25,
-          2.25
-        ],
+        "position": [0.25, 2.25],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -907,20 +553,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          0.75,
-          2.25
-        ],
+        "position": [0.75, 2.25],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -930,20 +567,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          1.25,
-          2.25
-        ],
+        "position": [1.25, 2.25],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -953,20 +581,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          -1.0,
-          2.75
-        ],
+        "position": [-1.0, 2.75],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -976,20 +595,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          -0.5,
-          2.75
-        ],
+        "position": [-0.5, 2.75],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -999,20 +609,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          0.0,
-          2.75
-        ],
+        "position": [0.0, 2.75],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -1022,20 +623,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          0.5,
-          2.75
-        ],
+        "position": [0.5, 2.75],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -1045,20 +637,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          1.0,
-          2.75
-        ],
+        "position": [1.0, 2.75],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -1068,20 +651,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          -0.75,
-          3.25
-        ],
+        "position": [-0.75, 3.25],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -1091,20 +665,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          -0.25,
-          3.25
-        ],
+        "position": [-0.25, 3.25],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -1114,20 +679,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          0.25,
-          3.25
-        ],
+        "position": [0.25, 3.25],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -1137,20 +693,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          0.75,
-          3.25
-        ],
+        "position": [0.75, 3.25],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -1160,20 +707,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          -0.5,
-          3.75
-        ],
+        "position": [-0.5, 3.75],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -1183,20 +721,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          0.0,
-          3.75
-        ],
+        "position": [0.0, 3.75],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -1206,20 +735,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          0.5,
-          3.75
-        ],
+        "position": [0.5, 3.75],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -1229,20 +749,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          -0.25,
-          4.25
-        ],
+        "position": [-0.25, 4.25],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -1252,20 +763,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          0.25,
-          4.25
-        ],
+        "position": [0.25, 4.25],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -1275,20 +777,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.25,
-            0.25
-          ]
+          "half_extents": [0.25, 0.25]
         },
-        "position": [
-          0.0,
-          4.75
-        ],
+        "position": [0.0, 4.75],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,

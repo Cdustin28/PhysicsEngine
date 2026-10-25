@@ -141,6 +141,76 @@ impl RigidBody {
         self.shape.contains_local_point(self.world_to_local(world))
     }
 
+    /// Velocity of the body's material at a world-space point: v + ω × r.
+    /// Zero for static bodies.
+    pub fn velocity_at(&self, world: Vec2) -> Vec2 {
+        if self.is_static {
+            Vec2::ZERO
+        } else {
+            self.velocity + self.angular_velocity * (world - self.position).perp()
+        }
+    }
+
+    /// Closest point on the body's surface to a world-space point, the
+    /// outward surface normal there, and whether the point is inside.
+    pub fn closest_surface_point(&self, world: Vec2) -> (Vec2, Vec2, bool) {
+        let local = self.world_to_local(world);
+        let (surface, normal, inside) = match self.shape {
+            Shape::Circle { radius } => {
+                let len = local.length();
+                let n = if len > 1e-9 { local / len } else { Vec2::Y };
+                (n * radius, n, len < radius)
+            }
+            Shape::Box { half_extents: h } => {
+                let clamped = local.clamp(-h, h);
+                if clamped != local {
+                    let n = (local - clamped).normalize_or(Vec2::Y);
+                    (clamped, n, false)
+                } else {
+                    // Inside: leave through the nearest face.
+                    let to_x = h.x - local.x.abs();
+                    let to_y = h.y - local.y.abs();
+                    if to_x < to_y {
+                        let s = if local.x < 0.0 { -1.0 } else { 1.0 };
+                        (Vec2::new(s * h.x, local.y), Vec2::new(s, 0.0), true)
+                    } else {
+                        let s = if local.y < 0.0 { -1.0 } else { 1.0 };
+                        (Vec2::new(local.x, s * h.y), Vec2::new(0.0, s), true)
+                    }
+                }
+            }
+        };
+        (
+            self.local_to_world(surface),
+            self.rotation().rotate(normal),
+            inside,
+        )
+    }
+
+    /// Points spaced about `spacing` apart around the body's outline, in
+    /// world space. Used as the fluid's boundary particles.
+    pub fn sample_surface(&self, spacing: f32, out: &mut Vec<Vec2>) {
+        match self.shape {
+            Shape::Circle { radius } => {
+                let n = ((std::f32::consts::TAU * radius / spacing).ceil() as usize).max(8);
+                out.extend((0..n).map(|k| {
+                    let a = std::f32::consts::TAU * k as f32 / n as f32;
+                    self.local_to_world(Vec2::from_angle(a) * radius)
+                }));
+            }
+            Shape::Box { .. } => {
+                let corners = self.box_corners().expect("box has corners");
+                for i in 0..4 {
+                    let (a, b) = (corners[i], corners[(i + 1) % 4]);
+                    let n = (((b - a).length() / spacing).ceil() as usize).max(1);
+                    // Each edge contributes its start corner but not its end,
+                    // so every corner appears exactly once.
+                    out.extend((0..n).map(|k| a.lerp(b, k as f32 / n as f32)));
+                }
+            }
+        }
+    }
+
     /// World-space corners of a box, counter-clockwise starting bottom-left.
     /// Returns `None` for circles.
     pub fn box_corners(&self) -> Option<[Vec2; 4]> {

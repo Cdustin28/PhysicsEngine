@@ -3,6 +3,7 @@
 use crate::body::{BodyId, RigidBody};
 use crate::broad_phase;
 use crate::collision::{self, Manifold};
+use crate::fluid::Fluid;
 use crate::solver::{self, SolverSettings};
 use glam::Vec2;
 use serde::{Deserialize, Serialize};
@@ -14,6 +15,9 @@ pub struct World {
     /// Gravitational acceleration, m/s².
     pub gravity: Vec2,
     pub bodies: Vec<RigidBody>,
+    /// SPH fluid particles. Left out of scene files that don't use fluid.
+    #[serde(default, skip_serializing_if = "Fluid::is_unused")]
+    pub fluid: Fluid,
     /// Contact solver tuning. Optional in scene files; older scenes without
     /// it get the defaults.
     #[serde(default)]
@@ -39,6 +43,7 @@ impl World {
         Self {
             gravity: Vec2::new(0.0, -crate::STANDARD_GRAVITY),
             bodies: Vec::new(),
+            fluid: Fluid::default(),
             solver: SolverSettings::default(),
             time: 0.0,
             contacts: Vec::new(),
@@ -88,9 +93,13 @@ impl World {
         &self.contacts
     }
 
-    /// Total kinetic energy, J.
+    /// Total kinetic energy of bodies and fluid, J.
     pub fn kinetic_energy(&self) -> f32 {
-        self.bodies.iter().map(RigidBody::kinetic_energy).sum()
+        self.bodies
+            .iter()
+            .map(RigidBody::kinetic_energy)
+            .sum::<f32>()
+            + self.fluid.kinetic_energy()
     }
 
     /// Total linear momentum of the dynamic bodies, kg·m/s.
@@ -108,6 +117,8 @@ impl World {
     /// steps make the simulation non-deterministic and less stable.
     ///
     /// One step is:
+    /// 0. **Fluid:** if there is any, advance it through its own substeps,
+    ///    with the bodies (at their current poses) as boundaries.
     /// 1. **Broad phase:** find pairs whose bounding boxes overlap.
     /// 2. **Narrow phase:** compute exact contact points for those pairs.
     /// 3. **Warm start bookkeeping:** carry impulses over from last step's
@@ -122,6 +133,14 @@ impl World {
             dt > 0.0 && dt.is_finite(),
             "time step must be positive, got {dt}"
         );
+
+        if !self.fluid.is_empty() {
+            let p = self.fluid.params;
+            let boundary = p.boundary(&self.bodies);
+            self.fluid.step(&boundary, self.gravity, dt);
+            self.fluid.project_out_of_bodies(&self.bodies);
+            self.fluid.remove_escaped();
+        }
 
         let mut contacts: Vec<Manifold> = broad_phase::sweep_and_prune_pairs(&self.bodies)
             .into_iter()

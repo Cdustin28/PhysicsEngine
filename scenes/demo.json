@@ -1,29 +1,17 @@
 {
   "format": "physicsengine-scene",
-  "version": 1,
+  "version": 2,
   "world": {
-    "gravity": [
-      0.0,
-      -9.80665
-    ],
+    "gravity": [0.0, -9.80665],
     "bodies": [
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            10.0,
-            0.25
-          ]
+          "half_extents": [10.0, 0.25]
         },
-        "position": [
-          0.0,
-          -0.25
-        ],
+        "position": [0.0, -0.25],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -33,20 +21,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.5,
-            0.5
-          ]
+          "half_extents": [0.5, 0.5]
         },
-        "position": [
-          -2.0,
-          0.5
-        ],
+        "position": [-2.0, 0.5],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -56,20 +35,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.5,
-            0.5
-          ]
+          "half_extents": [0.5, 0.5]
         },
-        "position": [
-          -2.0,
-          1.5
-        ],
+        "position": [-2.0, 1.5],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -79,20 +49,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.5,
-            0.5
-          ]
+          "half_extents": [0.5, 0.5]
         },
-        "position": [
-          -2.0,
-          2.5
-        ],
+        "position": [-2.0, 2.5],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -104,15 +65,9 @@
           "type": "circle",
           "radius": 0.5
         },
-        "position": [
-          0.5,
-          4.0
-        ],
+        "position": [0.5, 4.0],
         "angle": 0.0,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,
@@ -122,20 +77,11 @@
       {
         "shape": {
           "type": "box",
-          "half_extents": [
-            0.6,
-            0.3
-          ]
+          "half_extents": [0.6, 0.3]
         },
-        "position": [
-          2.5,
-          5.0
-        ],
+        "position": [2.5, 5.0],
         "angle": 0.4,
-        "velocity": [
-          0.0,
-          0.0
-        ],
+        "velocity": [0.0, 0.0],
         "angular_velocity": 0.0,
         "density": 10.0,
         "restitution": 0.3,

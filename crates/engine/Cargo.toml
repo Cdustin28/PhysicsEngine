@@ -11,6 +11,12 @@ repository.workspace = true
 glam.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+rayon = { version = "1.12", optional = true }
+
+[features]
+# Multithreaded fluid on desktop. Off by default, so the web build and
+# `cargo test -p engine` stay single-threaded and fully deterministic.
+parallel = ["dep:rayon"]
 
 [lints]
 workspace = true
