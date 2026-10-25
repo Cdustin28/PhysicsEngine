@@ -136,6 +136,7 @@ These apply to every milestone.
 - [x] **Handles:** round = rotate (snaps to 15°), square = resize (boxes resize symmetrically, circles by radius)
 - [x] **Grid snapping** (G or the toolbar checkbox): placement, moves, and sizes snap to a quarter of the visible grid; a group keeps its shape
 - [x] **Example gallery:** the built-in Examples menu (works offline and on the web); the same scenes are published at `/scenes/`
+- [x] **Dark mode** (toolbar toggle, remembered between sessions): dark grey panels and canvas in 2D and 3D. Colors that would vanish on dark grey switch with it: joints and ropes lighten, floors dim, and smoke turns pale and lightens what's behind it (screen blending) instead of darkening it.
 - [x] **Persistence:** camera, tool settings, display options, step rate, and the current scene are saved between sessions (desktop: the OS data folder; web: local storage), autosaving every 30 s and on exit
 
 **Done when:** someone with only a browser can open physicsengine.dev, build a scene, and share its JSON. This happens once the PR stack is merged and the Pages source is switched. The web build has passed CI since M0, but it hasn't been tried in a real browser from this environment.

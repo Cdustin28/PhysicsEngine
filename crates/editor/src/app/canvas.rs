@@ -3,7 +3,7 @@
 use super::{
     CARDINAL, CONTACT_COLOR, ColorBy, Drag, EditorApp, FluidShape, GOLD, Grab, HANDLE_RADIUS_PX,
     MAX_THROW_SPEED, MIN_HALF_SIZE, PRESSURE_COLOR_DEPTH, ROTATE_HANDLE_OFFSET_PX,
-    SPEED_COLOR_SCALE, STATIC_FILL, Tool, WATER_DEEP, WATER_LIGHT,
+    SPEED_COLOR_SCALE, Tool, WATER_DEEP, WATER_LIGHT,
 };
 use crate::particles::{Instance, ParticleCallback, color_bytes};
 use eframe::egui::{self, Color32, PointerButton, Pos2, Rect, Sense, Stroke, Ui};
@@ -586,7 +586,7 @@ impl EditorApp {
         override_fill: Option<Color32>,
     ) {
         let fill = override_fill.unwrap_or(if body.is_static {
-            STATIC_FILL
+            crate::theme::static_fill(crate::theme::is_dark(painter.ctx()), false)
         } else {
             CARDINAL
         });

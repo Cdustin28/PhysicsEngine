@@ -243,7 +243,7 @@ impl Editor3d {
     }
 
     /// Cells with visible smoke (or heat) as splats.
-    pub(super) fn gas_splats(&self) -> Vec<SplatInstance> {
+    pub(super) fn gas_splats(&self, dark: bool) -> Vec<SplatInstance> {
         let Some(gas) = &self.world.gas else {
             return Vec::new();
         };
@@ -254,7 +254,9 @@ impl Editor3d {
                 for i in 0..gas.nx {
                     let c = gas.idx(i, j, k);
                     let (tint, strength) = match self.gas_settings.view {
-                        GasView::Smoke => ([70, 70, 75], gas.smoke[c].min(1.0) * 0.5),
+                        GasView::Smoke => {
+                            (crate::theme::smoke_rgb(dark), gas.smoke[c].min(1.0) * 0.5)
+                        }
                         GasView::Temperature => {
                             let t = (gas.heat[c] / 100.0).clamp(-0.3, 1.0);
                             if t >= 0.0 {

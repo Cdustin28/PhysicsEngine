@@ -12,8 +12,6 @@ use engine3d::Vec3;
 use engine3d::joint::{Anchor, Joint, JointKind, add_chain};
 use serde::{Deserialize, Serialize};
 
-const JOINT_COLOR: Color32 = Color32::from_rgb(0x3C, 0x3C, 0x3C);
-const ROPE_COLOR: Color32 = Color32::from_rgb(0x8B, 0x5A, 0x2B);
 const GOLD: Color32 = Color32::from_rgb(0xF1, 0xBE, 0x48);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -183,6 +181,8 @@ impl Editor3d {
     /// Joints drawn over the scene: rods dark, ropes brown (pale when
     /// slack), springs as zigzags, gold dots at the anchors.
     pub(super) fn draw_joints(&self, painter: &egui::Painter, rect: Rect) {
+        let dark = crate::theme::is_dark(painter.ctx());
+        let (ink, rope) = (crate::theme::ink(dark), crate::theme::rope(dark));
         for joint in &self.world.joints {
             let (pa, pb) = joint.anchors(&self.world.bodies);
             let (Some(a), Some(b)) = (self.camera.project(rect, pa), self.camera.project(rect, pb))
@@ -196,11 +196,11 @@ impl Editor3d {
                     max_length,
                 } => {
                     let color = if min_length == max_length {
-                        JOINT_COLOR
+                        ink
                     } else if (pb - pa).length() < max_length - 1e-3 {
-                        ROPE_COLOR.gamma_multiply(0.5)
+                        rope.gamma_multiply(0.5)
                     } else {
-                        ROPE_COLOR
+                        rope
                     };
                     painter.line_segment([a, b], Stroke::new(2.0, color));
                 }
@@ -213,15 +213,15 @@ impl Editor3d {
                         pts.push(a + d * t + across * if k % 2 == 0 { 1.0 } else { -1.0 });
                     }
                     pts.push(b);
-                    painter.add(egui::Shape::line(pts, Stroke::new(1.5, JOINT_COLOR)));
+                    painter.add(egui::Shape::line(pts, Stroke::new(1.5, ink)));
                 }
             }
-            painter.circle(b, 3.5, GOLD, Stroke::new(1.0, JOINT_COLOR));
+            painter.circle(b, 3.5, GOLD, Stroke::new(1.0, ink));
         }
         if let Some((_, p)) = self.joint_click
             && let Some(s) = self.camera.project(rect, p)
         {
-            painter.circle(s, 5.0, GOLD, Stroke::new(1.5, JOINT_COLOR));
+            painter.circle(s, 5.0, GOLD, Stroke::new(1.5, ink));
         }
     }
 }

@@ -6,9 +6,7 @@ use eframe::egui::{self, Color32, PointerButton, Pos2, Rect, Sense, Ui};
 use engine3d::{BodyId, RigidBody, Shape, Vec3, presets};
 
 const CARDINAL: Color32 = Color32::from_rgb(0xC8, 0x10, 0x2E);
-const STATIC_FILL: Color32 = Color32::from_rgb(0xB4, 0xB6, 0xB9);
 const CONTACT_COLOR: Color32 = Color32::from_rgb(0x1F, 0x4E, 0x9A);
-const SKY: Color32 = Color32::from_rgb(0xEE, 0xF1, 0xF5);
 /// Water: deep blue at rest, pale when fast.
 const WATER_DEEP: Color32 = Color32::from_rgb(0x1F, 0x4E, 0x9A);
 const WATER_LIGHT: Color32 = Color32::from_rgb(0xA8, 0xDD, 0xF7);
@@ -416,16 +414,17 @@ impl Editor3d {
         }
 
         // --- Drawing.
-        painter.rect_filled(rect, 0.0, SKY);
+        let dark = crate::theme::is_dark(ui.ctx());
+        painter.rect_filled(rect, 0.0, crate::theme::sky(dark));
         if self.gpu_render {
-            painter.add(self.body_callback(rect).into_shape(rect));
+            painter.add(self.body_callback(rect, dark).into_shape(rect));
         } else {
             painter.text(
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
                 "The 3D view needs GPU rendering (wgpu), which isn't available here.",
                 egui::FontId::proportional(16.0),
-                Color32::DARK_GRAY,
+                ui.visuals().weak_text_color(),
             );
         }
         self.draw_joints(&painter, rect);
@@ -623,14 +622,18 @@ impl Editor3d {
         self.status = "Placed. Esc or V returns to Select.".into();
     }
 
-    fn body_callback(&self, rect: Rect) -> BodyCallback {
+    fn body_callback(&self, rect: Rect, dark: bool) -> BodyCallback {
         let forward = (self.camera.target - self.camera.eye()).normalize();
         let right = forward.cross(Vec3::Y).normalize_or(Vec3::X);
         let up = right.cross(forward);
         let selected = self.selected();
         let (mut cubes, mut spheres) = (Vec::new(), Vec::new());
         for (i, b) in self.world.bodies.iter().enumerate() {
-            let color = if b.is_static { STATIC_FILL } else { CARDINAL };
+            let color = if b.is_static {
+                crate::theme::static_fill(dark, true)
+            } else {
+                CARDINAL
+            };
             let (scale, list) = match b.shape {
                 Shape::Sphere { radius } => (Vec3::splat(radius), &mut spheres),
                 Shape::Cuboid { half_extents } => (half_extents, &mut cubes),
@@ -678,7 +681,7 @@ impl Editor3d {
             spheres,
             particles,
             self.soft_meshes(),
-            self.gas_splats(),
+            self.gas_splats(dark),
             CameraView {
                 view_proj: self.camera.view_proj(rect),
                 eye: self.camera.eye(),
@@ -686,6 +689,7 @@ impl Editor3d {
                 up,
             },
         )
+        .with_glowing_splats(dark)
     }
 
     fn draw_contacts(&self, painter: &egui::Painter, rect: Rect) {

@@ -5,6 +5,7 @@ mod app;
 mod camera;
 mod history;
 mod particles;
+mod theme;
 mod view3d;
 
 use app::EditorApp;

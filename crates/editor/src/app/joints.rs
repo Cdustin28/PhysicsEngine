@@ -13,9 +13,6 @@ use engine::Vec2;
 use engine::joint::{Anchor, Joint, JointKind, add_chain};
 use serde::{Deserialize, Serialize};
 
-const JOINT_COLOR: Color32 = Color32::from_rgb(0x3C, 0x3C, 0x3C);
-const ROPE_COLOR: Color32 = Color32::from_rgb(0x8B, 0x5A, 0x2B);
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) enum JointType {
     Pin,
@@ -240,6 +237,8 @@ impl EditorApp {
     /// Draw every joint: pins as gold dots, rods as lines, ropes in brown
     /// (lighter when slack), springs as zigzags.
     pub(super) fn draw_joints(&self, painter: &egui::Painter, viewport: Rect) {
+        let dark = crate::theme::is_dark(painter.ctx());
+        let (ink, rope) = (crate::theme::ink(dark), crate::theme::rope(dark));
         for joint in &self.world.joints {
             let (pa, pb) = joint.anchors(&self.world.bodies);
             let (a, b) = (
@@ -253,21 +252,21 @@ impl EditorApp {
                     max_length,
                 } => {
                     if min_length == max_length {
-                        painter.line_segment([a, b], Stroke::new(2.5, JOINT_COLOR));
+                        painter.line_segment([a, b], Stroke::new(2.5, ink));
                     } else {
                         let slack = (pb - pa).length() < max_length - 1e-3;
                         let color = if slack {
-                            ROPE_COLOR.gamma_multiply(0.5)
+                            rope.gamma_multiply(0.5)
                         } else {
-                            ROPE_COLOR
+                            rope
                         };
                         painter.line_segment([a, b], Stroke::new(2.0, color));
                     }
                 }
-                JointKind::Spring { .. } => draw_zigzag(painter, a, b),
+                JointKind::Spring { .. } => draw_zigzag(painter, a, b, ink),
             }
-            painter.circle_filled(a, 3.0, JOINT_COLOR);
-            painter.circle(b, 4.0, GOLD, Stroke::new(1.5, JOINT_COLOR));
+            painter.circle_filled(a, 3.0, ink);
+            painter.circle(b, 4.0, GOLD, Stroke::new(1.5, ink));
         }
     }
 
@@ -288,7 +287,7 @@ impl EditorApp {
     }
 }
 
-fn draw_zigzag(painter: &egui::Painter, a: Pos2, b: Pos2) {
+fn draw_zigzag(painter: &egui::Painter, a: Pos2, b: Pos2, color: Color32) {
     let d = b - a;
     let len = d.length();
     if len < 1.0 {
@@ -307,5 +306,5 @@ fn draw_zigzag(painter: &egui::Painter, a: Pos2, b: Pos2) {
     }
     points.push(a + d * (1.0 - lead));
     points.push(b);
-    painter.add(egui::Shape::line(points, Stroke::new(1.5, JOINT_COLOR)));
+    painter.add(egui::Shape::line(points, Stroke::new(1.5, color)));
 }

@@ -79,6 +79,10 @@ pub struct SplatInstance {
 /// blending: each one scales the color behind it toward its tint. A product
 /// doesn't depend on order, so thousands of splats need no sorting, and it
 /// behaves like light absorption (smoke darkens what's behind it).
+///
+/// On a dark background, darkening is invisible, so the dark theme uses
+/// `fs_glow` with *screen* blending instead: 1 − (1 − dst)(1 − src), which
+/// lightens toward the tint. It's also order-independent.
 const SPLAT_SHADER: &str = r"
 struct Globals {
     view_proj: mat4x4<f32>,
@@ -123,6 +127,16 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     }
     let falloff = (1.0 - r2) * (1.0 - r2);
     return vec4<f32>(mix(vec3<f32>(1.0), in.color.rgb, in.color.a * falloff), 1.0);
+}
+
+@fragment
+fn fs_glow(in: VertexOut) -> @location(0) vec4<f32> {
+    let r2 = dot(in.corner, in.corner);
+    if (r2 > 1.0) {
+        discard;
+    }
+    let falloff = (1.0 - r2) * (1.0 - r2);
+    return vec4<f32>(in.color.rgb * (in.color.a * falloff), 1.0);
 }
 ";
 
@@ -223,6 +237,9 @@ struct Mesh {
 pub struct BodyRenderer {
     pipeline: wgpu::RenderPipeline,
     splat_pipeline: wgpu::RenderPipeline,
+    glow_pipeline: wgpu::RenderPipeline,
+    /// This frame's splats lighten (screen) instead of darken.
+    glow: bool,
     splats: wgpu::Buffer,
     splat_capacity: usize,
     splat_count: u32,
@@ -329,51 +346,66 @@ impl BodyRenderer {
             label: Some("splats3d"),
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(SPLAT_SHADER)),
         });
-        let splat_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("splats3d"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &splat_module,
-                entry_point: Some("vs_main"),
-                compilation_options: Default::default(),
-                buffers: &[Some(wgpu::VertexBufferLayout {
-                    array_stride: std::mem::size_of::<SplatInstance>() as u64,
-                    step_mode: wgpu::VertexStepMode::Instance,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32, 2 => Unorm8x4],
-                })],
+        let splat_pipeline_with = |entry: &str, color: wgpu::BlendComponent| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("splats3d"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &splat_module,
+                    entry_point: Some("vs_main"),
+                    compilation_options: Default::default(),
+                    buffers: &[Some(wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<SplatInstance>() as u64,
+                        step_mode: wgpu::VertexStepMode::Instance,
+                        attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32, 2 => Unorm8x4],
+                    })],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &splat_module,
+                    entry_point: Some(entry),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: Some(wgpu::BlendState {
+                            color,
+                            alpha: wgpu::BlendComponent::OVER,
+                        }),
+                        write_mask: wgpu::ColorWrites::COLOR,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                // Bodies in front hide smoke behind them; smoke doesn't hide
+                // anything from the depth test.
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH_FORMAT,
+                    depth_write_enabled: Some(false),
+                    depth_compare: Some(wgpu::CompareFunction::Less),
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        // result = destination × source (multiplicative).
+        let splat_pipeline = splat_pipeline_with(
+            "fs_main",
+            wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::Dst,
+                dst_factor: wgpu::BlendFactor::Zero,
+                operation: wgpu::BlendOperation::Add,
             },
-            fragment: Some(wgpu::FragmentState {
-                module: &splat_module,
-                entry_point: Some("fs_main"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    // result = destination × source (multiplicative).
-                    blend: Some(wgpu::BlendState {
-                        color: wgpu::BlendComponent {
-                            src_factor: wgpu::BlendFactor::Dst,
-                            dst_factor: wgpu::BlendFactor::Zero,
-                            operation: wgpu::BlendOperation::Add,
-                        },
-                        alpha: wgpu::BlendComponent::OVER,
-                    }),
-                    write_mask: wgpu::ColorWrites::COLOR,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            // Bodies in front hide smoke behind them; smoke doesn't hide
-            // anything from the depth test.
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: DEPTH_FORMAT,
-                depth_write_enabled: Some(false),
-                depth_compare: Some(wgpu::CompareFunction::Less),
-                stencil: Default::default(),
-                bias: Default::default(),
-            }),
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        });
+        );
+        // result = source + destination × (1 − source) (screen).
+        let glow_pipeline = splat_pipeline_with(
+            "fs_glow",
+            wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::OneMinusSrc,
+                operation: wgpu::BlendOperation::Add,
+            },
+        );
         let globals = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("bodies3d globals"),
             size: std::mem::size_of::<Globals>() as u64,
@@ -395,6 +427,8 @@ impl BodyRenderer {
         Self {
             pipeline,
             splat_pipeline,
+            glow_pipeline,
+            glow: false,
             splats: splat_buffer(device, 1024),
             splat_capacity: 1024,
             splat_count: 0,
@@ -540,6 +574,8 @@ pub struct BodyCallback {
     particles_end: u32,
     soft: SoftMeshes,
     splats: Vec<SplatInstance>,
+    /// Splats lighten instead of darken (for dark backgrounds).
+    glow: bool,
     globals: Globals,
 }
 
@@ -572,6 +608,7 @@ impl BodyCallback {
             particles_end,
             soft,
             splats,
+            glow: false,
             globals: Globals {
                 view_proj: view_proj.to_cols_array_2d(),
                 eye: eye.extend(1.0).to_array(),
@@ -581,6 +618,13 @@ impl BodyCallback {
                 up: up.extend(0.0).to_array(),
             },
         }
+    }
+
+    /// Draw the splats by lightening what's behind them (screen blending),
+    /// for dark backgrounds, instead of darkening it.
+    pub fn with_glowing_splats(mut self, glow: bool) -> Self {
+        self.glow = glow;
+        self
     }
 
     pub fn into_shape(self, rect: Rect) -> egui::Shape {
@@ -636,6 +680,7 @@ impl CallbackTrait for BodyCallback {
             queue.write_buffer(&r.splats, 0, bytemuck::cast_slice(&self.splats));
         }
         r.splat_count = self.splats.len() as u32;
+        r.glow = self.glow;
         r.soft_draws = soft
             .bodies
             .iter()
@@ -681,7 +726,11 @@ impl CallbackTrait for BodyCallback {
         }
         // Smoke last, over everything opaque.
         if r.splat_count > 0 {
-            pass.set_pipeline(&r.splat_pipeline);
+            pass.set_pipeline(if r.glow {
+                &r.glow_pipeline
+            } else {
+                &r.splat_pipeline
+            });
             pass.set_bind_group(0, &r.bind_group, &[]);
             pass.set_vertex_buffer(0, r.splats.slice(..));
             pass.draw(0..6, 0..r.splat_count);
