@@ -79,11 +79,18 @@ const TAIT_GAMMA: i32 = 7;
 /// Boundary particle spacing as a fraction of fluid particle spacing.
 /// Denser than the fluid so particles can't squeeze through gaps.
 pub const BOUNDARY_SPACING_FACTOR: f32 = 0.5;
-/// Minimum gap between new fluid particles and body surfaces, as a fraction
-/// of particle spacing. Single-layer boundary particles over-count density
-/// very close to a wall, so particles placed (or projected) much closer than
-/// one spacing start out heavily compressed and get launched.
-const WALL_GAP_FACTOR: f32 = 0.9;
+/// How far inside each body's surface its boundary particles sit, as a
+/// fraction of particle spacing. Equal to the gap still water leaves next to
+/// a boundary layer (measured: 0.59 at walls, 0.48 at the floor), so the
+/// fluid's effective boundary is the real surface. See [`boundary`].
+pub const BOUNDARY_INSET_FACTOR: f32 = 0.55;
+/// Minimum distance between new (or projected) fluid particles and the
+/// boundary layer, as a fraction of particle spacing. Boundary particles
+/// over-count density very close by, so particles placed much closer than
+/// this start out heavily compressed and get launched.
+const BOUNDARY_GAP_FACTOR: f32 = 0.9;
+/// The same minimum, measured from the body's real surface.
+const SURFACE_GAP_FACTOR: f32 = BOUNDARY_GAP_FACTOR - BOUNDARY_INSET_FACTOR;
 /// Fluid particles that fall below this height are deleted.
 pub const KILL_DEPTH: f32 = -50.0;
 
@@ -116,7 +123,7 @@ impl Default for FluidParams {
             // particles before they reach the zone right at a wall where
             // single-layer boundary handling over-counts density, which
             // otherwise launches spray off walls and corners in hard impacts.
-            wall_viscosity: 0.3,
+            wall_viscosity: 0.5,
         }
     }
 }
@@ -132,6 +139,7 @@ impl FluidParams {
         Boundary::build(
             bodies,
             self.particle_spacing * BOUNDARY_SPACING_FACTOR,
+            self.particle_spacing * BOUNDARY_INSET_FACTOR,
             &self.kernel(),
             self.rest_density,
             self.support(),
@@ -185,6 +193,14 @@ impl FluidParams {
         }
         Ok(())
     }
+}
+
+/// Total push of the fluid on one body over a step: linear impulse (N·s) and
+/// angular impulse about the body's center (N·m·s).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct BodyImpulse {
+    pub linear: Vec2,
+    pub angular: f32,
 }
 
 /// Diagnostics from the most recent step.
@@ -340,12 +356,12 @@ impl Fluid {
                 existing.for_each_candidate(p, |k| {
                     crowded |= (self.positions[k] - p).length_squared() < (0.9 * d) * (0.9 * d);
                 });
-                // Keep at least one spacing from bodies. Boundary particles
-                // count a fluid particle closer than that as heavily
-                // compressed, and it would be thrown off at startup.
+                // Keep clear of bodies' boundary layers: a fluid particle
+                // much closer counts as heavily compressed and would be
+                // thrown off at startup.
                 let blocked = bodies.iter().any(|b| {
                     let (surface, _, inside_body) = b.closest_surface_point(p);
-                    inside_body || (surface - p).length() < WALL_GAP_FACTOR * d
+                    inside_body || (surface - p).length() < SURFACE_GAP_FACTOR * d
                 });
                 if !crowded && !blocked {
                     self.positions.push(p);
@@ -408,10 +424,22 @@ impl Fluid {
     /// Advance the fluid by `dt` seconds, taking as many substeps as the CFL
     /// condition needs. `boundary` describes the bodies at the start of the
     /// step.
-    pub fn step(&mut self, boundary: &Boundary, gravity: Vec2, dt: f32) {
+    ///
+    /// Returns the impulse the fluid exerted on each body during the step
+    /// (indexed like the bodies the boundary was built from, `body_count`
+    /// long). This is the reaction to the boundary forces the fluid felt, so
+    /// fluid and bodies exchange momentum exactly (Newton's third law).
+    pub fn step(
+        &mut self,
+        boundary: &Boundary,
+        gravity: Vec2,
+        dt: f32,
+        body_count: usize,
+    ) -> Vec<BodyImpulse> {
+        let mut impulses = vec![BodyImpulse::default(); body_count];
         if self.is_empty() {
             self.stats = FluidStats::default();
-            return;
+            return impulses;
         }
         self.fill_missing_velocities();
         self.sort_spatially();
@@ -431,18 +459,19 @@ impl Fluid {
                 .fold(0.0_f32, f32::max)
                 .sqrt();
             let h = (CFL * d / (c + v_max)).min(dt - elapsed);
-            self.substep(boundary, gravity, h, max_speed);
+            self.substep(boundary, gravity, h, max_speed, &mut impulses);
             elapsed += h;
             substeps += 1;
         }
         self.stats.substeps = substeps;
+        impulses
     }
 
     /// Reorder particles so that ones close together in space are close
     /// together in memory (sorted by grid row, then column). Neighbor loops
     /// then touch a few contiguous chunks of memory instead of jumping all
-    /// over the arrays. That's a big win for cache use and doesn't change
-    /// the physics.
+    /// over the arrays. It costs little, doesn't change the physics, and
+    /// matters once the particle count outgrows the CPU cache.
     fn sort_spatially(&mut self) {
         let inv = 1.0 / self.params.support();
         let key = |p: Vec2| ((p.y * inv).floor() as i32, (p.x * inv).floor() as i32);
@@ -452,7 +481,14 @@ impl Fluid {
         self.velocities = order.iter().map(|&i| self.velocities[i as usize]).collect();
     }
 
-    fn substep(&mut self, boundary: &Boundary, gravity: Vec2, dt: f32, max_speed: f32) {
+    fn substep(
+        &mut self,
+        boundary: &Boundary,
+        gravity: Vec2,
+        dt: f32,
+        max_speed: f32,
+        impulses: &mut [BodyImpulse],
+    ) {
         let params = self.params;
         let kernel = params.kernel();
         let h = params.support();
@@ -574,6 +610,36 @@ impl Fluid {
             *acc = a;
         });
 
+        // --- 4b. Reaction on bodies: for every fluid-boundary pair, the
+        // body gets exactly the opposite of the force the fluid particle got
+        // from it above. Only particles near a body have boundary neighbors,
+        // so this sequential pass is cheap.
+        for (i, list) in boundary_neighbors.iter().enumerate() {
+            if list.is_empty() {
+                continue;
+            }
+            let (xi, vi, rho_i) = (positions[i], velocities[i], densities[i]);
+            let pi_term = pressures[i] / (rho_i * rho_i);
+            for &b in list {
+                let b = b as usize;
+                let xb = boundary.positions[b];
+                let r = xi - xb;
+                let dist = r.length();
+                let mut coefficient = pi_term;
+                let vr = (vi - boundary.velocities[b]).dot(r);
+                if vr < 0.0 {
+                    let nu = params.wall_viscosity * h_visc * c / rho_i;
+                    coefficient += -nu * vr / (dist * dist + eps);
+                }
+                let force = mass * boundary.psi[b] * coefficient * kernel.grad(r, dist);
+                let body = boundary.body[b] as usize;
+                if let Some(impulse) = impulses.get_mut(body) {
+                    impulse.linear += force * dt;
+                    impulse.angular += (xb - boundary.body_centers[body]).perp_dot(force) * dt;
+                }
+            }
+        }
+
         // Diagnostics.
         let (mut max_c, mut sum_c, mut count) = (0.0_f32, 0.0_f32, 0_u32);
         for &rho in densities {
@@ -610,8 +676,8 @@ impl Fluid {
         }
         self.fill_missing_velocities();
         // Put it back where boundary pressure is moderate (see
-        // WALL_GAP_FACTOR). Closer, and it would be launched.
-        let margin = WALL_GAP_FACTOR * self.params.particle_spacing;
+        // BOUNDARY_GAP_FACTOR). Closer, and it would be launched.
+        let margin = SURFACE_GAP_FACTOR * self.params.particle_spacing;
         let boxes: Vec<Aabb> = bodies.iter().map(Aabb::of).collect();
         iter_mut!(self.positions)
             .zip(iter_mut!(self.velocities))
@@ -664,7 +730,7 @@ mod tests {
         let mut f = Fluid::default();
         f.fill_rect(Vec2::new(-1.0, -1.0), Vec2::new(1.0, 1.0), &[]);
         // One tiny step with no gravity just to compute densities.
-        f.step(&Boundary::default(), Vec2::ZERO, 1e-5);
+        f.step(&Boundary::default(), Vec2::ZERO, 1e-5, 0);
         let center = f
             .positions
             .iter()
@@ -700,7 +766,8 @@ mod tests {
             Vec2::new(1.0, 1.0),
             std::slice::from_ref(&block),
         );
-        assert!(f.len() < 400 - 100);
+        // The block covers 10 × 10 of the 20 × 20 lattice points.
+        assert!(f.len() <= 400 - 100, "{} particles", f.len());
         assert!(f.positions.iter().all(|&p| !block.contains_point(p)));
     }
 

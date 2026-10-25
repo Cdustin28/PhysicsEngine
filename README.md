@@ -4,7 +4,7 @@ A 2D rigid-body and particle-fluid physics engine with an interactive editor, wr
 
 Website: [physicsengine.dev](https://physicsengine.dev) · Plan: [ROADMAP.md](ROADMAP.md)
 
-> **Status:** milestone M2. Rigid boxes and circles collide, stack, bounce, and slide with friction, and SPH water flows around them. Two-way coupling (floating and sinking, M3) is next.
+> **Status:** milestone M3. Rigid boxes and circles collide, stack, bounce, and slide with friction. SPH water flows around them, and bodies float, sink, and get pushed by it. Next up is the web release at physicsengine.dev (M4).
 
 ## Running it
 
@@ -48,8 +48,9 @@ trunk serve --release   # then open http://127.0.0.1:8080
 | Contact overlay | D, or the checkbox under World |
 | Add water | F, then drag a rectangle (or switch to Brush and paint) |
 | Erase water | E, then drag |
+| Fluid force arrows | Fluid panel → Show forces on bodies (an arrow the length of the body's weight is 1 m) |
 
-Scenes save as human-readable JSON. **Save…/Open…** use file dialogs on desktop, and **Copy JSON/Paste JSON…** work everywhere. **Examples** loads the built-in scenes (demo, 55-box pyramid, friction ramps, bouncing balls, dam break). The same scenes are in [`scenes/`](scenes); regenerate them with `cargo run -p engine --example make_scenes`.
+Scenes save as human-readable JSON. **Save…/Open…** use file dialogs on desktop, and **Copy JSON/Paste JSON…** work everywhere. **Examples** loads the built-in scenes (demo, 55-box pyramid, friction ramps, bouncing balls, dam break, buoyancy). The same scenes are in [`scenes/`](scenes); regenerate them with `cargo run -p engine --example make_scenes`.
 
 ## Layout
 
@@ -58,13 +59,14 @@ crates/
   engine/   physics only: shapes, bodies, collision, contact solver, SPH fluid, scenes. No GUI deps.
     tests/physics.rs   rigid-body validation against known answers
     tests/fluid.rs     fluid validation (hydrostatics, dam break, leaks)
+    tests/coupling.rs  fluid ↔ body validation (Archimedes, momentum exchange)
     examples/          make_scenes (regenerate scenes/), bench_fluid (performance)
   editor/   eframe/egui app: canvas, tools, inspector. Builds native and wasm.
 scenes/     example scene files
 index.html  physicsengine.dev landing page (served by GitHub Pages)
 ```
 
-Units are SI throughout: meters, kilograms, seconds, radians. 2D density is kg/m². Water is 10 kg/m² (1000 kg/m³ × 1 cm), the same scale as body densities.
+Units are SI throughout: meters, kilograms, seconds, radians. 2D density is kg/m². Water is 10 kg/m² (1000 kg/m³ × 1 cm), the same scale as body densities: a body of density 5 floats half-submerged, and anything above 10 sinks.
 
 The desktop build runs the fluid on all CPU cores (the engine's `parallel` feature); the web build is single-threaded. To measure fluid performance on your machine:
 

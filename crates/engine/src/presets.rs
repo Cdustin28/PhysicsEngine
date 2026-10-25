@@ -16,6 +16,7 @@ pub const ALL: &[Preset] = &[
     ("ramp", ramp),
     ("bounce", bounce),
     ("dam_break", dam_break),
+    ("buoyancy", buoyancy),
 ];
 
 /// A 20 m static floor whose top surface is at y = 0.
@@ -122,6 +123,27 @@ pub fn dam_break() -> World {
     let bodies = w.bodies.clone();
     w.fluid
         .fill_rect(Vec2::new(-3.0, 0.0), Vec2::new(-1.0, 2.0), &bodies);
+    w
+}
+
+/// Archimedes in action: boxes of density 2.5, 5, and 7.5 (water is 10)
+/// float a quarter, half, and three quarters submerged; a density-20 box
+/// sinks; a light ball bobs up.
+pub fn buoyancy() -> World {
+    let mut w = tank(5.0, 2.5);
+    let bodies = w.bodies.clone();
+    w.fluid
+        .fill_rect(Vec2::new(-2.5, 0.0), Vec2::new(2.5, 1.2), &bodies);
+    for (x, density) in [(-1.8_f32, 2.5_f32), (-0.6, 5.0), (0.6, 7.5), (1.8, 20.0)] {
+        let mut b = RigidBody::new(Shape::rect(0.6, 0.4), Vec2::new(x, 1.6));
+        b.density = density;
+        w.add_body(b);
+    }
+    // Starts under water and is released.
+    let mut ball = RigidBody::new(Shape::Circle { radius: 0.2 }, Vec2::new(0.0, 0.5));
+    ball.density = 3.0;
+    w.fluid.remove_disc(ball.position, 0.25);
+    w.add_body(ball);
     w
 }
 
