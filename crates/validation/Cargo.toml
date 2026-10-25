@@ -1,0 +1,17 @@
+[package]
+name = "validation"
+description = "Runs the engines against analytic results and writes the physicsengine.dev validation page."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+engine = { path = "../engine", features = ["parallel"] }
+engine3d = { path = "../engine3d", features = ["parallel"] }
+glam.workspace = true
+
+[lints]
+workspace = true

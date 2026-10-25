@@ -30,6 +30,22 @@ jobs:
       - name: Engine tests, single-threaded
         run: cargo test -p engine --locked
 
+  validation:
+    name: validation page
+    needs: lint-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Fails if any check fails; the page is kept for review either way.
+      - run: cargo run --release --locked -p validation -- validation-page
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: validation-page
+          path: validation-page
+
   desktop:
     name: build (${{ matrix.os }})
     needs: lint-and-test

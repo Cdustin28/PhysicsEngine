@@ -292,7 +292,23 @@ These apply to every milestone.
 
 ## M10: Validation page
 
-- [ ] A page on physicsengine.dev comparing simulations with analytic and experimental results (the tables in these milestones, as plots), regenerated from the test suite
+- [x] `crates/validation`: ten scenarios run the real engines and compare with closed-form answers, writing physicsengine.dev/validation (inline SVG charts, no JavaScript) on every deploy. It exits non-zero if any check fails, so a regression blocks the deploy.
+- [x] Experimental data left out: everything on the page can be re-derived from the formula beside it.
+
+| Scenario | Engine | Theory | Result |
+|---|---|---|---|
+| Pendulum period, 5°–80° | 2D joints | 4√(L/g) K(sin θ₀/2) | within 0.02% |
+| Pendulum energy, 60°, 30 s | 2D joints | constant | ±1.24%, drift +0.09% |
+| Ball rolling / box sliding, 20° | 3D rigid | (5/7) g sin θ; g(sin θ − μ cos θ) | +0.50%; +0.56% |
+| Rebound height, e = 0.2–0.9 | 3D rigid | e² | within 0.018 h |
+| Spring period, 0.25–4 kg | 2D joints | 2π√(m/k) | within 0.4% |
+| XPBD chain stretch, 50–2000 N/m | 2D soft | m g n(n+1)/(2k) | +0.09% (10 substeps), +0.01% (40) |
+| Hydrostatic gradient | 2D SPH | ρ₀ g | +2.2% |
+| Floating cubes, 250–750 kg/m³ | 3D SPH + rigid | ρ/ρ_water | within 5.5% |
+| Gaussian heat peak, t = 0.5–5 s | 2D gas | σ₀²/(σ₀² + 2κt) | within 0.5% |
+| Warm patch initial acceleration | 2D / 3D gas | g′/2; 2g′/3 | −2.4%; −1.3% |
+
+Restitution is applied to the velocity at the start of the contact step, which includes that step's gravity, so balls with e near 1 bounce about 2% above e².
 
 ## Later
 
