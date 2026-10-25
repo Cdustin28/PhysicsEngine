@@ -1,0 +1,61 @@
+name: Deploy site
+
+# Publishes physicsengine.dev from `main`:
+#   /         the landing page (index.html)
+#   /sim/     the simulator, built for the browser with Trunk
+#   /scenes/  the example scene files
+#
+# One-time setup: in the repository's Settings → Pages, set
+# "Build and deployment → Source" to "GitHub Actions". (The custom domain
+# stays configured there; the CNAME file is also copied for good measure.)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never run two deployments at once; a newer push replaces an older one.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: trunk
+      - name: Build the simulator for the web
+        working-directory: crates/editor
+        # Relative asset paths, so the build works under /sim/.
+        run: trunk build --release --public-url ./
+      - name: Assemble the site
+        run: |
+          mkdir -p _site
+          cp index.html CNAME _site/
+          cp -r crates/editor/dist _site/sim
+          cp -r scenes _site/scenes
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

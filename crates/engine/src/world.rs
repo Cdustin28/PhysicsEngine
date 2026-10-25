@@ -1,6 +1,6 @@
 //! The simulation world and its time stepping.
 
-use crate::body::{BodyId, RigidBody};
+use crate::body::{BodyHandle, BodyId, RigidBody};
 use crate::broad_phase;
 use crate::collision::{self, Manifold};
 use crate::fluid::Fluid;
@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Everything that is simulated.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct World {
     /// Gravitational acceleration, m/s².
     pub gravity: Vec2,
@@ -33,6 +33,21 @@ pub struct World {
     /// last step, averaged over the step. Not saved in scene files.
     #[serde(skip)]
     fluid_forces: Vec<(Vec2, f32)>,
+    /// Next body handle to hand out. Not saved in scene files.
+    #[serde(skip)]
+    next_handle: u64,
+}
+
+impl PartialEq for World {
+    /// Worlds are equal if they'd save to the same scene: same gravity,
+    /// bodies, fluid, and solver settings. Run-time state (elapsed time,
+    /// cached contacts, handles) doesn't count.
+    fn eq(&self, other: &Self) -> bool {
+        self.gravity == other.gravity
+            && self.bodies == other.bodies
+            && self.fluid == other.fluid
+            && self.solver == other.solver
+    }
 }
 
 impl Default for World {
@@ -52,6 +67,7 @@ impl World {
             time: 0.0,
             contacts: Vec::new(),
             fluid_forces: Vec::new(),
+            next_handle: 1,
         }
     }
 
@@ -60,9 +76,40 @@ impl World {
         crate::presets::demo()
     }
 
-    pub fn add_body(&mut self, body: RigidBody) -> BodyId {
+    pub fn add_body(&mut self, mut body: RigidBody) -> BodyId {
+        body.handle = 0;
         self.bodies.push(body);
+        self.assign_handles();
         BodyId(self.bodies.len() - 1)
+    }
+
+    /// Give every body that doesn't have one a handle. Bodies get one when
+    /// added with [`World::add_body`]; this catches bodies pushed onto
+    /// `bodies` directly or loaded from a scene file.
+    pub fn assign_handles(&mut self) {
+        let highest = self.bodies.iter().map(|b| b.handle).max().unwrap_or(0);
+        self.next_handle = self.next_handle.max(highest + 1).max(1);
+        for body in &mut self.bodies {
+            if body.handle == 0 {
+                body.handle = self.next_handle;
+                self.next_handle += 1;
+            }
+        }
+    }
+
+    /// The stable handle of the body at `id`.
+    pub fn handle(&mut self, id: BodyId) -> Option<BodyHandle> {
+        self.assign_handles();
+        self.bodies.get(id.0).and_then(RigidBody::handle)
+    }
+
+    /// Where the body with this handle currently is, or `None` if it has
+    /// been removed.
+    pub fn find(&self, handle: BodyHandle) -> Option<BodyId> {
+        self.bodies
+            .iter()
+            .position(|b| b.handle == handle.0)
+            .map(BodyId)
     }
 
     /// Remove a body. Note that this shifts the indices of every body after
@@ -330,6 +377,37 @@ mod tests {
         let top = w.add_body(RigidBody::new(Shape::Circle { radius: 0.5 }, Vec2::ZERO));
         assert_eq!(w.body_at_point(Vec2::ZERO), Some(top));
         assert_eq!(w.body_at_point(Vec2::new(5.0, 5.0)), None);
+    }
+
+    #[test]
+    fn handles_survive_removing_other_bodies() {
+        let mut w = World::new();
+        let a = w.add_body(RigidBody::new(Shape::rect(1.0, 1.0), Vec2::ZERO));
+        let b = w.add_body(RigidBody::new(Shape::rect(1.0, 1.0), Vec2::X));
+        let c = w.add_body(RigidBody::new(Shape::rect(1.0, 1.0), Vec2::Y));
+        let (ha, hb, hc) = (
+            w.handle(a).unwrap(),
+            w.handle(b).unwrap(),
+            w.handle(c).unwrap(),
+        );
+        assert!(ha != hb && hb != hc);
+        w.remove_body(a);
+        assert_eq!(w.find(ha), None);
+        assert_eq!(w.find(hb), Some(BodyId(0)));
+        assert_eq!(w.find(hc), Some(BodyId(1)));
+        // A new body never reuses a removed body's handle.
+        let d = w.add_body(RigidBody::new(Shape::rect(1.0, 1.0), Vec2::ONE));
+        assert_ne!(w.handle(d), Some(ha));
+    }
+
+    #[test]
+    fn loaded_scenes_get_handles() {
+        let json = crate::Scene::from_world(&World::demo()).to_json();
+        let mut w = crate::Scene::from_json(&json).unwrap().world;
+        let handles: std::collections::HashSet<_> = (0..w.bodies.len())
+            .map(|i| w.handle(BodyId(i)).unwrap())
+            .collect();
+        assert_eq!(handles.len(), w.bodies.len());
     }
 
     #[test]

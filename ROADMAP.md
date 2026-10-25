@@ -123,19 +123,22 @@ These apply to every milestone.
 
 ---
 
-## M4: Web release and editor polish
+## M4: Web release and editor polish ✅
 
 **Goal:** the simulator runs live at physicsengine.dev.
 
-- [ ] GitHub Actions deploy: the landing page plus the Trunk build under `/sim/`. This needs GitHub Pages switched from "deploy from branch" to "GitHub Actions".
-- [ ] Browser-native scene file open/save (download and upload), in addition to copy/paste
-- [ ] Undo/redo using command history or world snapshots
-- [ ] Generational body handles, so deleting a body never invalidates others
-- [ ] Multi-select, rotate/resize handles, grid snapping
-- [ ] An example scene gallery (dam break, stacking, floating boxes) loaded from `scenes/`
-- [ ] Settings and last scene persisted between sessions (eframe `persistence`)
+- [x] **Deploy workflow** (`.github/workflows/deploy.yml`): on every push to `main`, builds the landing page at `/`, the simulator at `/sim/` (Trunk), and the example scenes at `/scenes/`, then publishes to GitHub Pages. **One-time setup:** Settings → Pages → *Source: GitHub Actions*.
+- [x] Landing page: a *Launch the simulator* button; the GitHub link now points at the real repository
+- [x] **Open/save in the browser:** *Open…* uses the browser's file picker; *Save…* downloads `scene.json`. Desktop keeps native dialogs. Copy/Paste JSON still works everywhere.
+- [x] **Undo/redo** (Ctrl+Z, Ctrl+Shift+Z / Ctrl+Y, toolbar buttons): snapshot-based. After any frame where nothing is in progress (no button held, simulation paused), the scene is compared with the last recorded one, so a whole drag is one step and every kind of edit is undoable without per-edit code. Running the simulation isn't recorded as an edit; Reset covers that. 100 steps are kept. Copies are cheap because fluid scratch space isn't cloned.
+- [x] **Stable body handles:** `BodyHandle`s are never reused and survive other bodies being removed (`World::find`). Selection and undo use them, so a selected body stays selected through undo. (Unique handles rather than slot+generation pairs, which gives the same guarantees without changing how the engine stores bodies.)
+- [x] **Multi-select:** Shift+click to add or remove, drag on empty space to box-select, Ctrl+A for all; drag any selected body to move the group; Make static/dynamic and Delete for the whole selection
+- [x] **Handles:** round = rotate (snaps to 15°), square = resize (boxes resize symmetrically, circles by radius)
+- [x] **Grid snapping** (G or the toolbar checkbox): placement, moves, and sizes snap to a quarter of the visible grid; a group keeps its shape
+- [x] **Example gallery:** the built-in Examples menu (works offline and on the web); the same scenes are published at `/scenes/`
+- [x] **Persistence:** camera, tool settings, display options, step rate, and the current scene are saved between sessions (desktop: the OS data folder; web: local storage), autosaving every 30 s and on exit
 
-**Done when:** someone with only a browser can open physicsengine.dev, build a scene, and share its JSON.
+**Done when:** someone with only a browser can open physicsengine.dev, build a scene, and share its JSON. This happens once the PR stack is merged and the Pages source is switched. The web build has passed CI since M0, but it hasn't been tried in a real browser from this environment.
 
 ---
 

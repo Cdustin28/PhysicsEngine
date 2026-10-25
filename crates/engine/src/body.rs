@@ -6,19 +6,24 @@ use serde::{Deserialize, Serialize};
 
 /// Index of a body inside a [`World`](crate::World).
 ///
-/// Handles are plain indices into `World::bodies`. Removing a body
-/// invalidates any `BodyId` greater than or equal to the removed one, so the
-/// editor clears its selection whenever it removes bodies. Generational
-/// handles are on the roadmap.
+/// A plain index into `World::bodies`: cheap, but removing a body shifts
+/// every index after it. To refer to a body across removals (a selection, an
+/// undo history), use its [`BodyHandle`] instead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct BodyId(pub usize);
+
+/// A name for a body that stays valid while other bodies are added and
+/// removed. Look it up with [`World::find`](crate::World::find). Handles
+/// are assigned by the world and aren't saved in scene files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct BodyHandle(pub(crate) u64);
 
 /// A 2D rigid body.
 ///
 /// Mass and moment of inertia are *derived* from `shape` and `density` every
 /// time they are needed rather than cached. That costs a few multiplies but
 /// means they can never go stale when the editor changes a shape or density.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RigidBody {
     pub shape: Shape,
     /// Center of mass in world space, m.
@@ -31,9 +36,10 @@ pub struct RigidBody {
     pub angular_velocity: f32,
     /// Areal density, kg/m². Ignored for static bodies.
     pub density: f32,
-    /// Coefficient of restitution in [0, 1]. Used once collisions land (M1).
+    /// Coefficient of restitution in [0, 1]: 0 = no bounce, 1 = perfectly
+    /// elastic.
     pub restitution: f32,
-    /// Coulomb friction coefficient. Used once collisions land (M1).
+    /// Coulomb friction coefficient.
     pub friction: f32,
     /// Static bodies have infinite mass and never move (floors, walls).
     pub is_static: bool,
@@ -44,9 +50,35 @@ pub struct RigidBody {
     /// Torque accumulated this step, N·m. Cleared after every step.
     #[serde(skip)]
     torque: f32,
+    /// Assigned by the world; 0 = not yet assigned. See [`BodyHandle`].
+    #[serde(skip)]
+    pub(crate) handle: u64,
+}
+
+impl PartialEq for RigidBody {
+    /// Bodies are equal if they're physically identical; which handle the
+    /// world gave them doesn't matter.
+    fn eq(&self, other: &Self) -> bool {
+        self.shape == other.shape
+            && self.position == other.position
+            && self.angle == other.angle
+            && self.velocity == other.velocity
+            && self.angular_velocity == other.angular_velocity
+            && self.density == other.density
+            && self.restitution == other.restitution
+            && self.friction == other.friction
+            && self.is_static == other.is_static
+            && self.force == other.force
+            && self.torque == other.torque
+    }
 }
 
 impl RigidBody {
+    /// The handle the world assigned this body, if it's been added to one.
+    pub fn handle(&self) -> Option<BodyHandle> {
+        (self.handle != 0).then_some(BodyHandle(self.handle))
+    }
+
     /// Default density: roughly a dense plastic slab 1 cm thick
     /// (1000 kg/m³ × 0.01 m = 10 kg/m²). Picked so default objects have
     /// sensible masses at human scale.
@@ -66,6 +98,7 @@ impl RigidBody {
             is_static: false,
             force: Vec2::ZERO,
             torque: 0.0,
+            handle: 0,
         }
     }
 

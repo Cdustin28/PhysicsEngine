@@ -3,6 +3,7 @@
 
 mod app;
 mod camera;
+mod history;
 
 use app::EditorApp;
 
