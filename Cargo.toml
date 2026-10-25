@@ -1,0 +1,33 @@
+[workspace]
+resolver = "3"
+members = ["crates/engine", "crates/editor"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["Cole Dustin"]
+repository = "https://github.com/Cdustin28/PhysicsEngine"
+homepage = "https://physicsengine.dev"
+
+[workspace.dependencies]
+glam = { version = "0.34", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+# Physics code is unbearably slow in debug builds. Optimize dependencies and
+# give our own crates a light optimization so `cargo run` stays interactive.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = "thin"

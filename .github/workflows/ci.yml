@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  lint-and-test:
+    name: fmt, clippy, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Linux GUI dependencies
+        run: sudo apt-get update && sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets --locked
+      - run: cargo test --workspace --locked
+
+  desktop:
+    name: build (${{ matrix.os }})
+    needs: lint-and-test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Linux GUI dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev
+      - run: cargo build --release --locked -p editor
+      - uses: actions/upload-artifact@v4
+        with:
+          name: physicsengine-${{ runner.os }}
+          path: |
+            target/release/physicsengine
+            target/release/physicsengine.exe
+          if-no-files-found: error
+
+  web:
+    name: build (web / wasm)
+    needs: lint-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: trunk
+      - name: Clippy for wasm
+        run: cargo clippy -p editor --target wasm32-unknown-unknown --locked
+      - name: Trunk build
+        working-directory: crates/editor
+        # --public-url ./ makes asset paths relative so the build works from any subpath.
+        run: trunk build --release --public-url ./
+      - uses: actions/upload-artifact@v4
+        with:
+          name: physicsengine-web
+          path: crates/editor/dist
+          if-no-files-found: error
