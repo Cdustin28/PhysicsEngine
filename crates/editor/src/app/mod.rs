@@ -338,6 +338,22 @@ impl EditorApp {
             .unwrap_or_default();
         persisted.theme.apply(&cc.egui_ctx);
         let mut app = Self::from_persisted(persisted);
+        // The landing page's menu links to `sim/?mode=2d|3d|orbits`.
+        #[cfg(target_arch = "wasm32")]
+        if let Some(mode) = cc
+            .integration_info
+            .web_info
+            .location
+            .query_map
+            .get("mode")
+            .and_then(|v| v.first())
+        {
+            app.mode = match mode.as_str() {
+                "3d" => Mode::ThreeD,
+                "orbits" => Mode::Orbits,
+                _ => Mode::TwoD,
+            };
+        }
         app.history.rebase(&app.world);
         app.gpu_render = crate::particles::ParticleRenderer::install(cc);
         let render3d = crate::view3d::render::BodyRenderer::install(cc);
