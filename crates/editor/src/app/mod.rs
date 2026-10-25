@@ -302,6 +302,21 @@ impl EditorApp {
         app.view3d.set_gpu_render(render3d);
         #[cfg(not(target_arch = "wasm32"))]
         {
+            app.view3d
+                .set_gpu_solver(cc.wgpu_render_state.as_ref().and_then(|rs| {
+                    let compute = rs
+                        .adapter
+                        .get_downlevel_capabilities()
+                        .flags
+                        .contains(eframe::egui_wgpu::wgpu::DownlevelFlags::COMPUTE_SHADERS);
+                    compute.then(|| {
+                        gpu::GpuSolver3d::new(
+                            rs.device.clone(),
+                            rs.queue.clone(),
+                            rs.adapter.get_info().name,
+                        )
+                    })
+                }));
             app.gpu_solver = cc.wgpu_render_state.as_ref().and_then(|rs| {
                 let compute = rs
                     .adapter

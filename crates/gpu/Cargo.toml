@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 engine = { path = "../engine" }
+engine3d = { path = "../engine3d" }
 # Same major version as eframe's renderer, so the editor can share its device.
 wgpu = "30"
 bytemuck = { version = "1", features = ["derive"] }
@@ -18,7 +19,7 @@ pollster = "0.4"
 
 [features]
 # Multithreaded CPU solver, for fair comparisons in the benchmark.
-parallel = ["engine/parallel"]
+parallel = ["engine/parallel", "engine3d/parallel"]
 
 [lints]
 workspace = true

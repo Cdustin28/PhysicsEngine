@@ -14,6 +14,8 @@ pub const ALL: &[Preset] = &[
     ("ramp", ramp),
     ("rolling", rolling),
     ("bounce", bounce),
+    ("dam_break", dam_break),
+    ("buoyancy", buoyancy),
 ];
 
 /// A 20 m × 20 m static floor whose top is at y = 0.
@@ -23,6 +25,60 @@ pub fn with_floor() -> World {
         Shape::cuboid(20.0, 0.5, 20.0),
         Vec3::new(0.0, -0.25, 0.0),
     ));
+    w
+}
+
+/// An open-topped glass tank on the floor: inner size `width` (x) ×
+/// `depth` (z), walls `height` tall and 0.2 m thick, centered on the origin.
+pub fn tank(width: f32, depth: f32, height: f32) -> World {
+    let mut w = with_floor();
+    w.bodies[0].friction = 0.5;
+    let t = 0.2;
+    let (hx, hz) = (0.5 * width, 0.5 * depth);
+    for sign in [-1.0, 1.0] {
+        w.add_body(RigidBody::new_static(
+            Shape::cuboid(t, height, depth + 2.0 * t),
+            Vec3::new(sign * (hx + 0.5 * t), 0.5 * height, 0.0),
+        ));
+        w.add_body(RigidBody::new_static(
+            Shape::cuboid(width, height, t),
+            Vec3::new(0.0, 0.5 * height, sign * (hz + 0.5 * t)),
+        ));
+    }
+    w
+}
+
+/// A column of water collapsing across a tank.
+pub fn dam_break() -> World {
+    let mut w = tank(3.0, 1.2, 1.2);
+    let bodies = w.bodies.clone();
+    w.fluid.fill_box(
+        Vec3::new(-1.5, 0.0, -0.6),
+        Vec3::new(-0.6, 1.0, 0.6),
+        &bodies,
+    );
+    w
+}
+
+/// Water with bodies of different densities: pine (500 kg/m³) floats half
+/// in, cork (250) floats high, a ball of 600 floats low, and steel-ish
+/// (2000) sinks.
+pub fn buoyancy() -> World {
+    let mut w = tank(2.0, 2.0, 1.0);
+    let bodies = w.bodies.clone();
+    w.fluid.fill_box(
+        Vec3::new(-1.0, 0.0, -1.0),
+        Vec3::new(1.0, 0.6, 1.0),
+        &bodies,
+    );
+    for (x, z, density) in [(-0.5, -0.5, 500.0), (0.5, -0.5, 250.0), (-0.5, 0.5, 2000.0)] {
+        let mut b = RigidBody::new(Shape::cube(0.4), Vec3::new(x, 1.2, z));
+        b.density = density;
+        w.add_body(b);
+    }
+    let mut ball = RigidBody::new(Shape::Sphere { radius: 0.25 }, Vec3::new(0.5, 1.2, 0.5));
+    ball.density = 600.0;
+    w.add_body(ball);
     w
 }
 

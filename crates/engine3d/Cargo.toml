@@ -11,6 +11,11 @@ repository.workspace = true
 glam.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+rayon = { version = "1.12", optional = true }
+
+[features]
+# Multithreaded fluid on desktop (off for the web build and tests).
+parallel = ["dep:rayon"]
 
 [lints]
 workspace = true

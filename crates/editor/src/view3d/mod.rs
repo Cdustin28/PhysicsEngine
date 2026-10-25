@@ -27,6 +27,8 @@ enum Tool {
     Select,
     Sphere,
     Box,
+    /// Click to drop a block of water.
+    Water,
 }
 
 /// Parameters for the next body placed with the Sphere or Box tool.
@@ -38,6 +40,8 @@ struct NewBody {
     size: Vec3,
     density: f32,
     is_static: bool,
+    /// Size of the block of water the Water tool drops, m.
+    water_size: Vec3,
 }
 
 impl Default for NewBody {
@@ -47,6 +51,7 @@ impl Default for NewBody {
             size: Vec3::ONE,
             density: RigidBody::DEFAULT_DENSITY,
             is_static: false,
+            water_size: Vec3::new(1.0, 0.6, 1.0),
         }
     }
 }
@@ -54,7 +59,7 @@ impl Default for NewBody {
 impl NewBody {
     fn shape(&self, tool: Tool) -> Option<Shape> {
         match tool {
-            Tool::Select => None,
+            Tool::Select | Tool::Water => None,
             Tool::Sphere => Some(Shape::Sphere {
                 radius: self.radius,
             }),
@@ -82,6 +87,7 @@ pub struct Persisted3d {
     new_body: NewBody,
     show_contacts: bool,
     time_scale: f32,
+    use_gpu: bool,
     /// The 3D scene as it was when the app closed, as scene JSON.
     scene: Option<String>,
 }
@@ -93,6 +99,7 @@ impl Default for Persisted3d {
             new_body: NewBody::default(),
             show_contacts: false,
             time_scale: 1.0,
+            use_gpu: false,
             scene: None,
         }
     }
@@ -115,6 +122,10 @@ pub struct Editor3d {
     pub status: String,
     /// Whether the GPU body renderer is available.
     gpu_render: bool,
+    /// The GPU fluid solver, if this machine can run it (desktop only).
+    #[cfg(not(target_arch = "wasm32"))]
+    gpu_solver: Option<gpu::GpuSolver3d>,
+    use_gpu: bool,
 }
 
 impl Editor3d {
@@ -146,6 +157,9 @@ impl Editor3d {
             show_contacts: p.show_contacts,
             status,
             gpu_render,
+            #[cfg(not(target_arch = "wasm32"))]
+            gpu_solver: None,
+            use_gpu: p.use_gpu,
         };
         editor.history.rebase(&editor.world);
         editor
@@ -157,6 +171,7 @@ impl Editor3d {
             new_body: self.new_body.clone(),
             show_contacts: self.show_contacts,
             time_scale: self.time_scale,
+            use_gpu: self.use_gpu,
             scene: Some(self.scene_json()),
         }
     }
@@ -171,6 +186,7 @@ impl Editor3d {
         match Scene::from_json(json) {
             Ok(scene) => {
                 self.replace_world(scene.world);
+                self.frame_scene();
                 self.status = format!("Loaded {source}.");
                 true
             }
@@ -188,7 +204,7 @@ impl Editor3d {
             let frame_time = ctx.input(|i| i.stable_dt).min(0.1) * self.time_scale;
             let steps = self.timestep.advance(frame_time);
             for _ in 0..steps {
-                self.world.step(self.timestep.dt);
+                self.step_world();
             }
             self.steps_last_frame = steps;
         }
@@ -210,6 +226,33 @@ impl Editor3d {
         self.gpu_render = on;
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn set_gpu_solver(&mut self, solver: Option<gpu::GpuSolver3d>) {
+        self.gpu_solver = solver;
+    }
+
+    /// The GPU's name, if the GPU fluid solver can be used here.
+    fn gpu_name(&self) -> Option<&str> {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(solver) = &self.gpu_solver {
+            return Some(solver.adapter_name());
+        }
+        None
+    }
+
+    /// One fixed step with the chosen fluid solver.
+    fn step_world(&mut self) {
+        let dt = self.timestep.dt;
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.use_gpu
+            && let Some(solver) = self.gpu_solver.as_mut()
+        {
+            self.world.step_with(dt, solver);
+            return;
+        }
+        self.world.step(dt);
+    }
+
     /// Pause (when switching to the 2D editor).
     pub fn pause_public(&mut self) {
         self.pause();
@@ -225,7 +268,7 @@ impl Editor3d {
     fn step_once(&mut self) {
         self.pause();
         self.history.record(&self.world);
-        self.world.step(self.timestep.dt);
+        self.step_world();
         self.history.rebase(&self.world);
     }
 
@@ -303,6 +346,36 @@ impl Editor3d {
         }
     }
 
+    /// Point the camera at the scene: the bodies (except huge ones like the
+    /// floor) and the water, from above and at a distance that fits them.
+    fn frame_scene(&mut self) {
+        let mut lo = Vec3::splat(f32::INFINITY);
+        let mut hi = Vec3::splat(f32::NEG_INFINITY);
+        for b in &self.world.bodies {
+            let extent = match b.shape {
+                Shape::Sphere { radius } => Vec3::splat(radius),
+                Shape::Cuboid { half_extents } => Vec3::splat(half_extents.length()),
+            };
+            if extent.x < 5.0 {
+                lo = lo.min(b.position - extent);
+                hi = hi.max(b.position + extent);
+            }
+        }
+        for &p in &self.world.fluid.positions {
+            lo = lo.min(p);
+            hi = hi.max(p);
+        }
+        if !lo.is_finite() {
+            self.camera = OrbitCamera::default();
+            return;
+        }
+        let radius = 0.5 * (hi - lo).length();
+        self.camera.target = 0.5 * (lo + hi);
+        self.camera.distance = (2.5 * radius).clamp(4.0, 60.0);
+        // Steep enough (about 50° down) to see into a tank over its walls.
+        self.camera.pitch = self.camera.pitch.max(0.85);
+    }
+
     /// Aim the camera at the selected body.
     fn focus_selected(&mut self) {
         if let Some(b) = self.selected().and_then(|id| self.world.body(id)) {
@@ -353,6 +426,9 @@ impl Editor3d {
         }
         if pressed(Key::B) {
             self.tool = Tool::Box;
+        }
+        if pressed(Key::W) {
+            self.tool = Tool::Water;
         }
         if pressed(Key::F) {
             self.focus_selected();

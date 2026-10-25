@@ -3,6 +3,7 @@
 use crate::body::{BodyHandle, BodyId, RigidBody};
 use crate::broad_phase;
 use crate::collision::{self, Manifold};
+use crate::fluid::{CpuSolver, Fluid, FluidSolver};
 use crate::solver::{self, SolverSettings};
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
@@ -21,6 +22,13 @@ pub struct World {
     pub bodies: Vec<RigidBody>,
     #[serde(default)]
     pub solver: SolverSettings,
+    /// SPH water. Left out of scene files when unused.
+    #[serde(default, skip_serializing_if = "Fluid::is_unused")]
+    pub fluid: Fluid,
+    /// Force and torque the fluid exerted on each body in the last step
+    /// (N, N·m), for display.
+    #[serde(skip)]
+    pub fluid_forces: Vec<(Vec3, Vec3)>,
     #[serde(skip)]
     pub time: f64,
     #[serde(skip)]
@@ -32,7 +40,10 @@ pub struct World {
 impl PartialEq for World {
     /// Same scene: gravity, bodies, and solver settings.
     fn eq(&self, other: &Self) -> bool {
-        self.gravity == other.gravity && self.bodies == other.bodies && self.solver == other.solver
+        self.gravity == other.gravity
+            && self.bodies == other.bodies
+            && self.solver == other.solver
+            && self.fluid == other.fluid
     }
 }
 
@@ -49,6 +60,8 @@ impl World {
             gravity: Vec3::new(0.0, -crate::STANDARD_GRAVITY, 0.0),
             bodies: Vec::new(),
             solver: SolverSettings::default(),
+            fluid: Fluid::default(),
+            fluid_forces: Vec::new(),
             time: 0.0,
             contacts: Vec::new(),
             next_handle: 1,
@@ -107,8 +120,13 @@ impl World {
         &self.contacts
     }
 
+    /// Kinetic energy of the bodies and the fluid, J.
     pub fn kinetic_energy(&self) -> f32 {
-        self.bodies.iter().map(RigidBody::kinetic_energy).sum()
+        self.bodies
+            .iter()
+            .map(RigidBody::kinetic_energy)
+            .sum::<f32>()
+            + self.fluid.kinetic_energy()
     }
 
     pub fn momentum(&self) -> Vec3 {
@@ -132,14 +150,43 @@ impl World {
             .min_by(|a, b| a.1.total_cmp(&b.1))
     }
 
-    /// Advance by exactly `dt` seconds (fixed steps, as in 2D): broad phase,
-    /// narrow phase, warm-start bookkeeping, velocities, contact solve,
-    /// positions.
+    /// Advance by exactly `dt` seconds with the CPU fluid solver.
     pub fn step(&mut self, dt: f32) {
+        self.step_with(dt, &mut CpuSolver);
+    }
+
+    /// Advance by exactly `dt` seconds (fixed steps, as in 2D): fluid (whose
+    /// push on the bodies becomes forces on them), broad phase, narrow
+    /// phase, warm-start bookkeeping, velocities, contact solve, positions.
+    pub fn step_with(&mut self, dt: f32, fluid_solver: &mut dyn FluidSolver) {
         assert!(
             dt > 0.0 && dt.is_finite(),
             "time step must be positive, got {dt}"
         );
+        self.fluid_forces.clear();
+        if !self.fluid.is_empty() {
+            let boundary = self
+                .fluid
+                .params
+                .boundary(&self.bodies, self.fluid.boundary_region());
+            let impulses = fluid_solver.step(
+                &mut self.fluid,
+                &boundary,
+                self.gravity,
+                dt,
+                self.bodies.len(),
+            );
+            self.fluid.project_out_of_bodies(&self.bodies);
+            self.fluid.remove_escaped();
+            for (body, impulse) in self.bodies.iter_mut().zip(&impulses) {
+                let (force, torque) = (impulse.linear / dt, impulse.angular / dt);
+                if !body.is_static {
+                    body.apply_force(force);
+                    body.apply_torque(torque);
+                }
+                self.fluid_forces.push((force, torque));
+            }
+        }
         let mut contacts: Vec<Manifold> = broad_phase::sweep_and_prune_pairs(&self.bodies)
             .into_iter()
             .filter_map(|(i, j)| collision::collide(i, &self.bodies[i], j, &self.bodies[j]))

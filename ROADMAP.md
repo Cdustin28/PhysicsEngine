@@ -190,12 +190,27 @@ These apply to every milestone.
 - [ ] Translate/rotate gizmos and multi-select (the 2D editor has them; 3D has drag-to-move and the inspector for now)
 - [ ] Shadows (they'd help judge depth)
 
-### M6b: 3D fluid
+### M6b: 3D fluid ✅
 
-- [ ] 3D SPH (CPU): cubic-spline kernel in 3D, 3D grid, boundary particles on box and sphere surfaces, water at 1000 kg/m³
-- [ ] Two-way coupling with 3D bodies (buoyancy, drag, torque)
-- [ ] GPU SPH in 3D (the M5 compute shaders with a 3D grid)
-- [ ] 3D particle rendering (instanced sphere impostors)
+- [x] 3D SPH on the CPU (`engine3d::fluid`): the 2D solver's algorithm and constants with the 3D cubic spline (σ = 8/(πh³)), a 27-cell neighbor grid, and water at 1000 kg/m³. Default particle spacing is 0.1 m (a cubic meter of water is 1,000 particles; halving the spacing means 8×).
+- [x] Boundary particles on box and sphere surfaces, sampled only near the water (a 20 m floor at fluid resolution would otherwise be 300,000+ points). Boundary spacing is 0.7 × the fluid's (2D uses 0.5): within 1 cm of Archimedes at 60% of the cost; 1.0 left sunk bodies resting on a film of water.
+- [x] Two-way coupling with 3D bodies: buoyancy, drag, and torque (r × F), with exact equal-and-opposite impulses
+- [x] GPU solver in 3D (`gpu::GpuSolver3d`, `sph3d.wgsl`), checked against the CPU solver
+- [x] Editor: Water tool (W) drops a block of water onto whatever is under the mouse; water panel (resolution, viscosity, GPU toggle, drain); particles drawn as instanced low-poly spheres with depth; camera frames each loaded scene; Dam break and Buoyancy examples
+- [x] `tests/fluid3d.rs` (CPU) and `gpu/tests/agreement3d.rs` (GPU):
+
+  | Test | Expected | Measured |
+  | --- | --- | --- |
+  | Pressure at depth 0.2 / 0.3 / 0.4 m | ρgh = 1961 / 2942 / 3923 Pa | 1880 / 2941 / 3819 Pa |
+  | Still water, 3 s; dam break against a wall | no leaks | 0 particles escape |
+  | Dam break settles: 1,080 L over 3.6 m² | mean particle height 0.150 m | 0.147 m |
+  | 0.3 m cubes at 500 / 250 kg/m³ | draft 0.150 / 0.075 m | 0.151 / 0.074 m |
+  | 0.3 m cube at 2000 kg/m³ | rests on the floor (center 0.15 m) | 0.145 m |
+  | Ball into a free blob, no gravity | momentum conserved | relative error 1.6e-7 |
+  | GPU vs CPU, one dam-break step | same positions, density, wall force | within 2 mm, 1%, 2% |
+
+- [ ] Rendering water as a surface (screen-space fluid rendering) instead of balls
+- [ ] Performance: about 7 ms per step for 1,000 particles on 2 CPU cores. Cache static bodies' boundary particles between steps, and keep the GPU's data resident instead of copying it every step.
 
 ---
 

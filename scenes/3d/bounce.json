@@ -1,6 +1,6 @@
 {
   "format": "physicsengine-scene-3d",
-  "version": 1,
+  "version": 2,
   "world": {
     "gravity": [0.0, -9.80665, 0.0],
     "bodies": [
