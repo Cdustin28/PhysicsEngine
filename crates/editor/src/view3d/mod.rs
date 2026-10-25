@@ -6,6 +6,7 @@
 //! - `orbit.rs`: the orbit camera, picking rays
 //! - `render.rs`: GPU drawing of bodies
 
+mod joints;
 mod orbit;
 pub mod render;
 mod ui;
@@ -29,6 +30,10 @@ enum Tool {
     Box,
     /// Click to drop a block of water.
     Water,
+    /// Two clicks: pin, rod, rope, or spring.
+    Joint,
+    /// Two clicks: a chain between them.
+    Chain,
 }
 
 /// Parameters for the next body placed with the Sphere or Box tool.
@@ -59,7 +64,7 @@ impl Default for NewBody {
 impl NewBody {
     fn shape(&self, tool: Tool) -> Option<Shape> {
         match tool {
-            Tool::Select | Tool::Water => None,
+            Tool::Select | Tool::Water | Tool::Joint | Tool::Chain => None,
             Tool::Sphere => Some(Shape::Sphere {
                 radius: self.radius,
             }),
@@ -88,6 +93,7 @@ pub struct Persisted3d {
     show_contacts: bool,
     time_scale: f32,
     use_gpu: bool,
+    joint_settings: joints::JointSettings,
     /// The 3D scene as it was when the app closed, as scene JSON.
     scene: Option<String>,
 }
@@ -100,6 +106,7 @@ impl Default for Persisted3d {
             show_contacts: false,
             time_scale: 1.0,
             use_gpu: false,
+            joint_settings: joints::JointSettings::default(),
             scene: None,
         }
     }
@@ -119,6 +126,9 @@ pub struct Editor3d {
     selection: Option<BodyHandle>,
     grab: Option<Grab>,
     show_contacts: bool,
+    joint_settings: joints::JointSettings,
+    /// First click of the Joint or Chain tool: body (if any) and point.
+    joint_click: Option<(Option<usize>, Vec3)>,
     pub status: String,
     /// Whether the GPU body renderer is available.
     gpu_render: bool,
@@ -155,6 +165,8 @@ impl Editor3d {
             selection: None,
             grab: None,
             show_contacts: p.show_contacts,
+            joint_settings: p.joint_settings.clone(),
+            joint_click: None,
             status,
             gpu_render,
             #[cfg(not(target_arch = "wasm32"))]
@@ -172,6 +184,7 @@ impl Editor3d {
             show_contacts: self.show_contacts,
             time_scale: self.time_scale,
             use_gpu: self.use_gpu,
+            joint_settings: self.joint_settings.clone(),
             scene: Some(self.scene_json()),
         }
     }
@@ -417,6 +430,7 @@ impl Editor3d {
         if pressed(Key::Escape) {
             self.tool = Tool::Select;
             self.selection = None;
+            self.joint_click = None;
         }
         if pressed(Key::V) {
             self.tool = Tool::Select;
@@ -429,6 +443,14 @@ impl Editor3d {
         }
         if pressed(Key::W) {
             self.tool = Tool::Water;
+        }
+        if pressed(Key::J) {
+            self.tool = Tool::Joint;
+            self.joint_click = None;
+        }
+        if pressed(Key::L) {
+            self.tool = Tool::Chain;
+            self.joint_click = None;
         }
         if pressed(Key::F) {
             self.focus_selected();

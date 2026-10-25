@@ -35,8 +35,8 @@ pub struct Scene {
 
 impl Scene {
     pub const FORMAT: &'static str = "physicsengine-scene-3d";
-    /// 2 added `fluid`. Version 1 files (no fluid) load unchanged.
-    pub const VERSION: u32 = 2;
+    /// 2 added `fluid`, 3 added `joints`. Older files load unchanged.
+    pub const VERSION: u32 = 3;
     pub const OLDEST_SUPPORTED: u32 = 1;
 
     pub fn from_world(world: &World) -> Self {
@@ -70,6 +70,11 @@ impl Scene {
             body.orientation = body.orientation.normalize();
         }
         scene.world.fluid.validate().map_err(SceneError::Invalid)?;
+        for (i, joint) in scene.world.joints.iter().enumerate() {
+            joint
+                .validate(scene.world.bodies.len())
+                .map_err(|e| SceneError::Invalid(format!("joint {i}: {e}")))?;
+        }
         scene.world.fluid.fill_missing_velocities();
         scene.world.assign_handles();
         Ok(scene)

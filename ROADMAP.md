@@ -214,10 +214,52 @@ These apply to every milestone.
 
 ---
 
-## Stretch goals
+## M7: Joints, ropes, chains ✅
 
-- Joints and constraints (pin, hinge, spring), plus ropes and chains
-- Soft bodies (mass–spring, or extended position-based dynamics)
-- Grid-based (Eulerian) smoke and dye solver as an alternative fluid model
-- Heat transfer and multiphase fluids
-- A validation page comparing simulations against analytic and experimental results
+**Goal:** tie bodies together, in 2D and 3D.
+
+- [x] Pin (2D hinge; 3D ball-and-socket), distance (rod; rope with slack), and spring (N/m, N·s/m, implicit soft constraint) joints; `World::add_joint`; jointed bodies don't collide with each other; removing a body removes its joints
+- [x] Solved in the contact solver's sweeps with warm starting. Each sweep aims at the joint's *predicted end-of-step* state (linear in velocity, plus a fixed curvature term for each lever arm's swing): a SHAKE-style scheme with no long-term energy drift. The textbook velocity-only constraint lost 23% of a 60° pendulum's energy in 10 s.
+- [x] Rigid-body substeps (`SolverSettings::substeps`, default 1). Chains whip; 4 substeps keep their pins within about a millimeter (1 substep: up to 1 cm).
+- [x] `add_chain` builder; presets: Pendulums, Rope bridge, Newton's cradle, Springs (2D); Pendulums, Newton's cradle, Chain drape (3D)
+- [x] Editor: Joint tool (J) and Chain tool (L) in 2D and 3D; joints drawn as pins, rods, ropes (pale when slack), zigzag springs; "Remove joints" in the inspector; substeps in the Solver panel
+- [x] Scene format v3 (2D and 3D) adds `joints`; older files load
+- [x] `tests/joints.rs` (2D) and `tests/joints3d.rs` (3D):
+
+  | Test | Expected | Result |
+  | --- | --- | --- |
+  | Pendulum, 5° (disk/ball on a 1 m rod) | T = 2π√((l² + I/m)/(g l)) | within 0.5% |
+  | Pendulum, 60°, 30 s | energy conserved | error bounded at ±1.2%, no drift |
+  | Conical pendulum (3D), 10 s | L_y conserved, stays on its cone | within 1%, within 1° |
+  | 1 kg on a 40 N/m spring | stretch mg/k, T = 2π√(m/k) = 0.993 s | within 1% |
+  | Slack rope | no force until taut | free fall exact to 1e-4 m |
+  | Newton's cradle (2D) | last ball leaves at ≈ the striking speed | > 90% of 3.03 m/s |
+  | Whipping chain, 4 substeps | pins hold, no energy gain | gaps < 2 mm (2D), < 3 mm (3D) |
+
+- [ ] Hinge with an axis in 3D, joint limits and motors
+- [ ] Breakable joints
+
+## M8: Soft bodies
+
+- [ ] Deformable blobs and cloth with XPBD (extended position-based dynamics): distance and volume/area constraints with physical compliance
+- [ ] Collisions with rigid bodies (both ways) and with the ground
+- [ ] Editor tools and presets; tests (stiffness → measured stretch, energy, no tunneling)
+- [ ] 2D, then 3D
+
+## M9: Smoke, dye, and heat
+
+- [ ] Grid-based (Eulerian) fluid: semi-Lagrangian advection, pressure projection (stable fluids, Stam 1999)
+- [ ] Dye and smoke density carried by the flow; obstacles from rigid bodies
+- [ ] Heat: temperature carried by the flow, diffusion (Fourier's law), and buoyancy (Boussinesq): hot air rises
+- [ ] Editor: emitters, heaters, viewing modes; tests (diffusion against the analytic solution, divergence-free flow, energy)
+- [ ] 2D, then 3D
+
+## M10: Validation page
+
+- [ ] A page on physicsengine.dev comparing simulations with analytic and experimental results (the tables in these milestones, as plots), regenerated from the test suite
+
+## Later
+
+- Multiphase fluids (oil and water)
+- Heat in the SPH fluid
+- Screen-space fluid surface rendering

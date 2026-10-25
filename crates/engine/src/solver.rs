@@ -27,6 +27,7 @@
 
 use crate::body::RigidBody;
 use crate::collision::Manifold;
+use crate::joint::{self, Joint, JointVelocities};
 use glam::Vec2;
 use serde::{Deserialize, Serialize};
 
@@ -49,6 +50,11 @@ pub struct SolverSettings {
     pub restitution_threshold: f32,
     /// Start each step from last step's impulses.
     pub warm_starting: bool,
+    /// Split each world step into this many rigid-body substeps (collision,
+    /// solve, move). 1 is fine for stacks and piles; chains and ropes stay
+    /// much tighter with 4–8, at proportional cost. The fluid still steps
+    /// once per world step.
+    pub substeps: u32,
 }
 
 impl Default for SolverSettings {
@@ -59,6 +65,7 @@ impl Default for SolverSettings {
             allowed_penetration: 0.005,
             restitution_threshold: 1.0,
             warm_starting: true,
+            substeps: 1,
         }
     }
 }
@@ -118,6 +125,16 @@ impl Velocities {
     /// v + ω × r.
     fn at(&self, i: usize, r: Vec2) -> Vec2 {
         self.v[i] + self.w[i] * r.perp()
+    }
+
+    /// The same state as seen by the joint solver.
+    fn joint_view(&mut self) -> JointVelocities<'_> {
+        JointVelocities {
+            v: &mut self.v,
+            w: &mut self.w,
+            inv_mass: &self.inv_mass,
+            inv_inertia: &self.inv_inertia,
+        }
     }
 
     /// Relative velocity of B with respect to A at a contact point.
@@ -228,6 +245,7 @@ fn solve_block(
 pub fn solve(
     bodies: &mut [RigidBody],
     manifolds: &mut [Manifold],
+    joints: &mut [Joint],
     settings: &SolverSettings,
     dt: f32,
 ) -> PositionCorrection {
@@ -245,12 +263,27 @@ pub fn solve(
         inv_mass: bodies.iter().map(RigidBody::inverse_mass).collect(),
         inv_inertia: bodies.iter().map(RigidBody::inverse_inertia).collect(),
     };
+    // One extra, immovable slot at index n: the world, for joints anchored
+    // to a fixed point.
+    vel.v.push(Vec2::ZERO);
+    vel.w.push(0.0);
+    vel.inv_mass.push(0.0);
+    vel.inv_inertia.push(0.0);
+    let world = n;
 
     // --- Prepare everything that stays fixed during the iterations.
     let prepared: Vec<PreparedManifold> = manifolds
         .iter()
         .map(|m| prepare(m, bodies, &vel, settings, dt))
         .collect();
+
+    let prepared_joints: Vec<joint::PreparedJoint> = joints
+        .iter()
+        .map(|j| joint::prepare(j, bodies, &vel.joint_view(), world, dt))
+        .collect();
+    for (pj, j) in prepared_joints.iter().zip(joints.iter_mut()) {
+        joint::warm_start(pj, j, &mut vel.joint_view(), settings.warm_starting);
+    }
 
     // --- Warm start: re-apply last step's impulses.
     for (pm, m) in prepared.iter().zip(manifolds.iter_mut()) {
@@ -268,6 +301,11 @@ pub fn solve(
     // --- Velocity iterations.
     let mut normal_totals: Vec<f32> = Vec::with_capacity(2);
     for _ in 0..settings.velocity_iterations {
+        // Joints first, then contacts, so contacts (which can't be
+        // violated by pushing through a wall) get the last word.
+        for (pj, j) in prepared_joints.iter().zip(joints.iter_mut()) {
+            joint::solve_velocity(pj, j, &mut vel.joint_view(), dt);
+        }
         for (pm, m) in prepared.iter().zip(manifolds.iter_mut()) {
             // Friction first: it depends on the normal impulse, and solving
             // the normal last means non-penetration gets the final word.
@@ -303,11 +341,12 @@ pub fn solve(
     // separate pseudo-velocities that start at zero, aiming for a separating
     // speed of `position_bias`. No friction and no warm starting.
     let mut pseudo = Velocities {
-        v: vec![Vec2::ZERO; n],
-        w: vec![0.0; n],
+        v: vec![Vec2::ZERO; n + 1],
+        w: vec![0.0; n + 1],
         inv_mass: vel.inv_mass,
         inv_inertia: vel.inv_inertia,
     };
+    let mut joint_totals = vec![Vec2::ZERO; joints.len()];
     let mut totals: Vec<Vec<f32>> = prepared
         .iter()
         .map(|pm| vec![0.0; pm.points.len()])
@@ -317,12 +356,17 @@ pub fn solve(
         .map(|pm| pm.points.iter().any(|p| p.position_bias > 0.0))
         .collect();
     for _ in 0..settings.velocity_iterations {
+        for (pj, total) in prepared_joints.iter().zip(&mut joint_totals) {
+            joint::solve_position(pj, total, &mut pseudo.joint_view(), settings.baumgarte, dt);
+        }
         for ((pm, t), &needed) in prepared.iter().zip(&mut totals).zip(&needs_correction) {
             if needed {
                 solve_normal(&mut pseudo, pm, t, |p| p.position_bias);
             }
         }
     }
+    pseudo.v.truncate(n);
+    pseudo.w.truncate(n);
     PositionCorrection {
         v: pseudo.v,
         w: pseudo.w,

@@ -16,6 +16,9 @@ pub const ALL: &[Preset] = &[
     ("bounce", bounce),
     ("dam_break", dam_break),
     ("buoyancy", buoyancy),
+    ("pendulums", pendulums),
+    ("newtons_cradle", newtons_cradle),
+    ("chain_drape", chain_drape),
 ];
 
 /// A 20 m × 20 m static floor whose top is at y = 0.
@@ -186,6 +189,94 @@ pub fn bounce() -> World {
         ball.restitution = e;
         w.add_body(ball);
     }
+    w
+}
+
+/// A ball on a rod swinging in a cone, a double pendulum, and a hanging
+/// chain.
+pub fn pendulums() -> World {
+    use crate::joint::{Anchor, Joint, add_chain};
+    let mut w = with_floor();
+    w.solver.substeps = 4;
+    // Conical pendulum: 1.5 m rod, 40° out, pushed sideways.
+    let pivot = Vec3::new(-3.0, 4.0, 0.0);
+    let a = 40f32.to_radians();
+    let bob = pivot + 1.5 * Vec3::new(a.sin(), -a.cos(), 0.0);
+    let mut ball = RigidBody::new(Shape::Sphere { radius: 0.2 }, bob);
+    // Speed for a steady cone: v = √(g L sin θ tan θ).
+    ball.velocity = Vec3::new(
+        0.0,
+        0.0,
+        (crate::STANDARD_GRAVITY * 1.5 * a.sin() * a.tan()).sqrt(),
+    );
+    let id = w.add_body(ball).0;
+    w.joints.push(Joint::rod(&w.bodies, id, bob, None, pivot));
+    // Double pendulum, released horizontally.
+    let pivot = Vec3::new(0.0, 4.0, 0.0);
+    let (p1, p2) = (pivot + Vec3::X, pivot + 2.0 * Vec3::X);
+    let b1 = w
+        .add_body(RigidBody::new(Shape::Sphere { radius: 0.15 }, p1))
+        .0;
+    let b2 = w
+        .add_body(RigidBody::new(Shape::Sphere { radius: 0.15 }, p2))
+        .0;
+    w.joints.push(Joint::rod(&w.bodies, b1, p1, None, pivot));
+    w.joints.push(Joint::rod(&w.bodies, b2, p2, Some(b1), p1));
+    // A chain released horizontally.
+    add_chain(
+        &mut w,
+        Vec3::new(3.0, 4.0, 0.0),
+        Vec3::new(3.0, 4.0, 3.0),
+        12,
+        0.08,
+        Anchor::World,
+        Anchor::Free,
+    );
+    w
+}
+
+/// Five steel balls on rods, the first pulled back 40°.
+pub fn newtons_cradle() -> World {
+    use crate::joint::Joint;
+    let mut w = with_floor();
+    let (r, length) = (0.25, 2.0);
+    for i in 0..5 {
+        let x = (i as f32 - 2.0) * (2.0 * r + 0.001);
+        let pivot = Vec3::new(x, 4.0, 0.0);
+        let pos = if i == 0 {
+            pivot + length * Vec3::new(-40f32.to_radians().sin(), -40f32.to_radians().cos(), 0.0)
+        } else {
+            pivot - Vec3::new(0.0, length, 0.0)
+        };
+        let mut ball = RigidBody::new(Shape::Sphere { radius: r }, pos);
+        ball.restitution = 1.0;
+        ball.friction = 0.0;
+        ball.density = 7800.0;
+        let id = w.add_body(ball).0;
+        w.joints.push(Joint::rod(&w.bodies, id, pos, None, pivot));
+    }
+    w.solver.restitution_threshold = 0.05;
+    w
+}
+
+/// A chain falling across a ball and draping over it.
+pub fn chain_drape() -> World {
+    use crate::joint::{Anchor, add_chain};
+    let mut w = with_floor();
+    w.solver.substeps = 4;
+    w.add_body(RigidBody::new_static(
+        Shape::Sphere { radius: 1.0 },
+        Vec3::new(0.0, 1.0, 0.0),
+    ));
+    add_chain(
+        &mut w,
+        Vec3::new(-2.5, 2.6, 0.2),
+        Vec3::new(2.5, 2.6, -0.2),
+        24,
+        0.08,
+        Anchor::Free,
+        Anchor::Free,
+    );
     w
 }
 

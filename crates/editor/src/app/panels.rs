@@ -88,6 +88,8 @@ impl EditorApp {
             let mut chosen = None;
             egui::ComboBox::from_id_salt("examples")
                 .selected_text("Examples")
+                // Tall enough to list every example without scrolling.
+                .height(600.0)
                 .show_ui(ui, |ui| {
                     for &(name, make) in presets::ALL {
                         if ui.selectable_label(false, title_case(name)).clicked() {
@@ -149,6 +151,10 @@ impl EditorApp {
                 ui.selectable_value(&mut self.tool, Tool::Fluid, "Fluid (F)");
                 ui.selectable_value(&mut self.tool, Tool::Erase, "Erase (E)");
             });
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut self.tool, Tool::Joint, "Joint (J)");
+                ui.selectable_value(&mut self.tool, Tool::Chain, "Chain (L)");
+            });
             self.tool_options(ui);
 
             ui.separator();
@@ -167,6 +173,15 @@ impl EditorApp {
                 [id] => {
                     if self.inspector(ui, id) {
                         self.delete_selected();
+                    }
+                    let attached = self.world.joints.iter().filter(|j| j.involves(id.0)).count();
+                    if attached > 0
+                        && ui
+                            .button(format!("Remove {attached} joint(s)"))
+                            .clicked()
+                    {
+                        self.world.remove_joints_of(id);
+                        self.status = format!("Removed {attached} joint(s).");
                     }
                 }
                 _ => {
@@ -212,6 +227,8 @@ impl EditorApp {
     fn tool_options(&mut self, ui: &mut Ui) {
         match self.tool {
             Tool::Select => {}
+            Tool::Joint => self.joint_tool_options(ui),
+            Tool::Chain => self.chain_tool_options(ui),
             Tool::Fluid => {
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
@@ -328,6 +345,11 @@ impl EditorApp {
                 ui.end_row();
                 ui.label("Warm starting");
                 ui.checkbox(&mut s.warm_starting, "");
+                ui.end_row();
+                ui.label("Substeps").on_hover_text(
+                    "Rigid-body substeps per step. Chains and ropes stay tighter with 4–8.",
+                );
+                ui.add(egui::Slider::new(&mut s.substeps, 1..=16));
                 ui.end_row();
             });
             if ui.button("Reset to defaults").clicked() {
@@ -631,6 +653,7 @@ pub(crate) fn title_case(s: &str) -> String {
         .map(|c| c.to_uppercase().chain(chars).collect::<String>())
         .unwrap_or_default()
         .replace('_', " ")
+        .replace("Newtons", "Newton's")
 }
 
 /// A labeled DragValue for a positive length in meters.
