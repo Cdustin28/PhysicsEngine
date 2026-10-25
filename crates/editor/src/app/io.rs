@@ -19,6 +19,7 @@ impl EditorApp {
         match self.mode {
             Mode::TwoD => Scene::from_world(&self.world).to_json(),
             Mode::ThreeD => self.view3d.scene_json(),
+            Mode::Orbits => self.orbits.system_json(),
         }
     }
 

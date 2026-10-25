@@ -18,6 +18,7 @@ engine3d = { path = "../engine3d" }
 eframe = { version = "0.37", features = ["persistence"] }
 glam.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 bytemuck = { version = "1", features = ["derive"] }
 # File dialogs: native OS dialogs on desktop, the browser's picker on the web.
 rfd = "0.17"

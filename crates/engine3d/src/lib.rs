@@ -21,6 +21,7 @@
 //! - [`joint`]: pins, rods, ropes, springs, chains
 //! - [`soft`]: deformable balls, cloth, and jelly (XPBD)
 //! - [`gas`]: smoke, dye, and heat on a grid
+//! - [`orbits`]: planets and moons under N-body gravity, in real units
 //! - [`ray`]: ray casts for picking
 //! - [`scene`], [`presets`]: JSON files and built-in examples
 
@@ -30,6 +31,7 @@ pub mod collision;
 pub mod fluid;
 pub mod gas;
 pub mod joint;
+pub mod orbits;
 pub mod presets;
 pub mod ray;
 pub mod scene;

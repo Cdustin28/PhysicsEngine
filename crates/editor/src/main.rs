@@ -4,6 +4,7 @@
 mod app;
 mod camera;
 mod history;
+mod orbits;
 mod particles;
 mod theme;
 mod view3d;

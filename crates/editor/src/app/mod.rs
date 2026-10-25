@@ -19,6 +19,7 @@ pub(crate) use panels::title_case;
 
 use crate::camera::Camera;
 use crate::history::History;
+use crate::orbits::{OrbitEditor, PersistedOrbits};
 use crate::theme::Theme;
 use crate::view3d::{Editor3d, Persisted3d};
 use eframe::egui::{self, Color32, Key, KeyboardShortcut, Modifiers, Ui};
@@ -61,6 +62,8 @@ enum Mode {
     #[default]
     TwoD,
     ThreeD,
+    /// Planets and moons under gravity.
+    Orbits,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -219,6 +222,7 @@ struct Persisted {
     soft_settings: soft::SoftSettings,
     gas_settings: gas::GasSettings,
     view3d: Persisted3d,
+    orbits: PersistedOrbits,
     camera: Camera,
     new_body: NewBodySettings,
     fluid_shape: FluidShape,
@@ -243,6 +247,7 @@ impl Default for Persisted {
             soft_settings: soft::SoftSettings::default(),
             gas_settings: gas::GasSettings::default(),
             view3d: Persisted3d::default(),
+            orbits: PersistedOrbits::default(),
             camera: Camera::default(),
             new_body: NewBodySettings::default(),
             fluid_shape: FluidShape::Rectangle,
@@ -264,6 +269,8 @@ pub struct EditorApp {
     theme: Theme,
     /// The 3D editor (its own world, camera, history).
     view3d: Editor3d,
+    /// The Orbits tab.
+    orbits: OrbitEditor,
     world: World,
     /// World state captured when Play was pressed, restored by Reset.
     snapshot: Option<World>,
@@ -335,6 +342,7 @@ impl EditorApp {
         app.gpu_render = crate::particles::ParticleRenderer::install(cc);
         let render3d = crate::view3d::render::BodyRenderer::install(cc);
         app.view3d.set_gpu_render(render3d);
+        app.orbits.set_gpu_render(render3d);
         #[cfg(not(target_arch = "wasm32"))]
         {
             app.view3d
@@ -414,6 +422,7 @@ impl EditorApp {
             mode: p.mode,
             theme: p.theme,
             view3d: Editor3d::new(std::mem::take(&mut p.view3d), false),
+            orbits: OrbitEditor::new(std::mem::take(&mut p.orbits), false),
             world,
             snapshot: None,
             running: false,
@@ -461,6 +470,7 @@ impl EditorApp {
             soft_settings: self.soft_settings.clone(),
             gas_settings: self.gas_settings.clone(),
             view3d: self.view3d.persisted(),
+            orbits: self.orbits.persisted(),
             camera: self.camera,
             new_body: self.new_body.clone(),
             fluid_shape: self.fluid_shape,
@@ -673,11 +683,16 @@ impl EditorApp {
         if mode != self.mode {
             self.pause();
             self.view3d.pause_public();
+            self.orbits.pause();
             self.mode = mode;
         }
     }
 
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
+        if self.mode == Mode::Orbits {
+            self.orbits.handle_shortcuts(ctx);
+            return;
+        }
         if self.mode == Mode::ThreeD {
             self.view3d.handle_shortcuts(ctx);
             return;
@@ -773,6 +788,10 @@ impl eframe::App for EditorApp {
             self.view3d.logic(ctx);
             return;
         }
+        if self.mode == Mode::Orbits {
+            self.orbits.logic(ctx);
+            return;
+        }
         if self.running {
             // Cap the frame time so a stall (window drag, breakpoint) doesn't
             // dump seconds of backlog into the simulation.
@@ -795,6 +814,17 @@ impl eframe::App for EditorApp {
         // status bar shows last frame's cursor position. Nobody can tell.
         egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui));
 
+        if self.mode == Mode::Orbits {
+            egui::Panel::left("sidebar_orbits")
+                .resizable(true)
+                .default_size(300.0)
+                .show(ui, |ui| self.orbits.sidebar(ui));
+            egui::CentralPanel::no_frame().show(ui, |ui| self.orbits.canvas(ui));
+            if let Some(s) = self.orbits.take_status() {
+                self.status = s;
+            }
+            return;
+        }
         if self.mode == Mode::ThreeD {
             egui::Panel::left("sidebar3d")
                 .resizable(true)
