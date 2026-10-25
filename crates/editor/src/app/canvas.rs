@@ -42,6 +42,7 @@ impl EditorApp {
             Tool::Joint => self.joint_tool_input(ui, &response, cursor_world),
             Tool::Chain => self.chain_tool_input(ui, &response, cursor_world),
             Tool::Soft => self.soft_tool_input(&response, cursor_world),
+            Tool::Smoke => self.smoke_tool_input(&response, cursor_world),
             Tool::Circle | Tool::Box => {
                 if response.clicked_by(PointerButton::Primary)
                     && let Some(p) = cursor_world
@@ -58,6 +59,8 @@ impl EditorApp {
         let visuals = ui.visuals();
         painter.rect_filled(viewport, 0.0, visuals.extreme_bg_color);
         self.draw_grid(&painter, viewport, visuals.weak_text_color());
+        self.viewport_world = self.camera.visible_world_bounds(viewport);
+        self.draw_gas(ui, &painter, viewport);
         self.draw_fluid(&painter, viewport);
 
         let selected: Vec<BodyId> = self.selected_ids();

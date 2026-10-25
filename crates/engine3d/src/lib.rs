@@ -20,6 +20,7 @@
 //! - [`fluid`]: SPH water and its coupling with bodies
 //! - [`joint`]: pins, rods, ropes, springs, chains
 //! - [`soft`]: deformable balls, cloth, and jelly (XPBD)
+//! - [`gas`]: smoke, dye, and heat on a grid
 //! - [`ray`]: ray casts for picking
 //! - [`scene`], [`presets`]: JSON files and built-in examples
 
@@ -27,6 +28,7 @@ pub mod body;
 pub mod broad_phase;
 pub mod collision;
 pub mod fluid;
+pub mod gas;
 pub mod joint;
 pub mod presets;
 pub mod ray;
@@ -38,6 +40,7 @@ pub mod world;
 
 pub use body::{BodyHandle, BodyId, RigidBody};
 pub use fluid::{CpuSolver, Fluid, FluidParams, FluidSolver};
+pub use gas::{Emitter, Gas, GasParams};
 pub use glam::{Quat, Vec3};
 pub use joint::{Joint, JointKind};
 pub use scene::{Scene, SceneError};

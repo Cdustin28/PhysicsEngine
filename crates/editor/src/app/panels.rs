@@ -156,6 +156,9 @@ impl EditorApp {
                 ui.selectable_value(&mut self.tool, Tool::Chain, "Chain (L)");
                 ui.selectable_value(&mut self.tool, Tool::Soft, "Soft (S)");
             });
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut self.tool, Tool::Smoke, "Smoke (K)");
+            });
             self.tool_options(ui);
 
             ui.separator();
@@ -163,6 +166,10 @@ impl EditorApp {
 
             ui.separator();
             self.fluid_panel(ui);
+
+            ui.separator();
+            let view = self.viewport_world;
+            self.gas_panel(ui, view);
 
             ui.separator();
             ui.heading("Selection");
@@ -235,6 +242,7 @@ impl EditorApp {
             Tool::Joint => self.joint_tool_options(ui),
             Tool::Chain => self.chain_tool_options(ui),
             Tool::Soft => self.soft_tool_options(ui),
+            Tool::Smoke => self.smoke_tool_options(ui),
             Tool::Fluid => {
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
@@ -601,7 +609,8 @@ impl EditorApp {
                 ));
             }
             ui.separator();
-            ui.label(format!("KE {:.2} J", self.world.kinetic_energy()));
+            // abs(): an empty sum is -0.0, which would print as "-0.00".
+            ui.label(format!("KE {:.2} J", self.world.kinetic_energy().abs()));
             ui.separator();
             ui.label(format!(
                 "{:.0} Hz × {} steps/frame",

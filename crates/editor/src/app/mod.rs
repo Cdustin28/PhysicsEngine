@@ -9,6 +9,7 @@
 //! The 3D editor lives in `crate::view3d`; this app switches between them.
 
 mod canvas;
+mod gas;
 mod io;
 mod joints;
 mod panels;
@@ -77,6 +78,8 @@ enum Tool {
     Chain,
     /// Place a soft blob or jelly block.
     Soft,
+    /// Paint smoke and heat, or place emitters.
+    Smoke,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -117,13 +120,11 @@ impl Default for NewBodySettings {
 impl NewBodySettings {
     fn shape(&self, tool: Tool) -> Option<Shape> {
         match tool {
-            Tool::Select | Tool::Fluid | Tool::Erase | Tool::Joint | Tool::Chain | Tool::Soft => {
-                None
-            }
             Tool::Circle => Some(Shape::Circle {
                 radius: self.radius,
             }),
             Tool::Box => Some(Shape::rect(self.width, self.height)),
+            _ => None,
         }
     }
 
@@ -215,6 +216,7 @@ struct Persisted {
     mode: Mode,
     joint_settings: joints::JointSettings,
     soft_settings: soft::SoftSettings,
+    gas_settings: gas::GasSettings,
     view3d: Persisted3d,
     camera: Camera,
     new_body: NewBodySettings,
@@ -237,6 +239,7 @@ impl Default for Persisted {
             mode: Mode::TwoD,
             joint_settings: joints::JointSettings::default(),
             soft_settings: soft::SoftSettings::default(),
+            gas_settings: gas::GasSettings::default(),
             view3d: Persisted3d::default(),
             camera: Camera::default(),
             new_body: NewBodySettings::default(),
@@ -292,6 +295,11 @@ pub struct EditorApp {
     selected_soft: Option<usize>,
     /// Soft body being dragged, and the cursor's last position.
     soft_drag: Option<(usize, Vec2)>,
+    gas_settings: gas::GasSettings,
+    /// The smoke/heat grid's image, updated every frame.
+    gas_texture: Option<egui::TextureHandle>,
+    /// The world rectangle on screen last frame (for sizing new grids).
+    viewport_world: (Vec2, Vec2),
 
     /// Text of the "Paste scene JSON" window while it is open.
     paste_buffer: Option<String>,
@@ -427,6 +435,9 @@ impl EditorApp {
             soft_settings: p.soft_settings.clone(),
             selected_soft: None,
             soft_drag: None,
+            gas_settings: p.gas_settings.clone(),
+            gas_texture: None,
+            viewport_world: (Vec2::new(-5.0, 0.0), Vec2::new(5.0, 7.0)),
             paste_buffer: None,
             pending_open: io::PendingFile::default(),
             status,
@@ -443,6 +454,7 @@ impl EditorApp {
             mode: self.mode,
             joint_settings: self.joint_settings.clone(),
             soft_settings: self.soft_settings.clone(),
+            gas_settings: self.gas_settings.clone(),
             view3d: self.view3d.persisted(),
             camera: self.camera,
             new_body: self.new_body.clone(),
@@ -731,6 +743,9 @@ impl EditorApp {
         }
         if pressed(Key::S) {
             self.tool = Tool::Soft;
+        }
+        if pressed(Key::K) {
+            self.tool = Tool::Smoke;
         }
         if pressed(Key::G) {
             self.snap = !self.snap;

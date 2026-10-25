@@ -1,0 +1,100 @@
+{
+  "format": "physicsengine-scene",
+  "version": 5,
+  "world": {
+    "gravity": [0.0, -9.80665],
+    "bodies": [
+      {
+        "shape": {
+          "type": "box",
+          "half_extents": [10.0, 0.25]
+        },
+        "position": [0.0, -0.25],
+        "angle": 0.0,
+        "velocity": [0.0, 0.0],
+        "angular_velocity": 0.0,
+        "density": 10.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": true
+      },
+      {
+        "shape": {
+          "type": "box",
+          "half_extents": [1.0, 0.075]
+        },
+        "position": [-1.6, 3.5],
+        "angle": 0.15,
+        "velocity": [0.0, 0.0],
+        "angular_velocity": 0.0,
+        "density": 10.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": true
+      },
+      {
+        "shape": {
+          "type": "box",
+          "half_extents": [0.35, 0.35]
+        },
+        "position": [1.5, 0.35],
+        "angle": 0.0,
+        "velocity": [0.0, 0.0],
+        "angular_velocity": 0.0,
+        "density": 10.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "box",
+          "half_extents": [0.35, 0.35]
+        },
+        "position": [2.3, 0.35],
+        "angle": 0.0,
+        "velocity": [0.0, 0.0],
+        "angular_velocity": 0.0,
+        "density": 10.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": false
+      }
+    ],
+    "solver": {
+      "velocity_iterations": 10,
+      "baumgarte": 0.2,
+      "allowed_penetration": 0.005,
+      "restitution_threshold": 1.0,
+      "warm_starting": true,
+      "substeps": 1
+    },
+    "soft": {
+      "substeps": 20
+    },
+    "gas": {
+      "origin": [-5.0, 0.0],
+      "cell": 0.1,
+      "nx": 100,
+      "ny": 70,
+      "params": {
+        "ambient_temperature": 293.15,
+        "thermal_diffusivity": 0.000022,
+        "smoke_weight": 0.0,
+        "smoke_decay": 0.05,
+        "cooling": 0.0,
+        "open_top": true,
+        "step_hz": 30.0
+      },
+      "emitters": [
+        {
+          "center": [-2.0, 0.3],
+          "radius": 0.3,
+          "smoke_rate": 1.5,
+          "temperature": 373.15,
+          "velocity": [0.0, 0.0]
+        }
+      ]
+    }
+  }
+}

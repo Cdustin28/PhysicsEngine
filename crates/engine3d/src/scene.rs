@@ -35,9 +35,9 @@ pub struct Scene {
 
 impl Scene {
     pub const FORMAT: &'static str = "physicsengine-scene-3d";
-    /// 2 added `fluid`, 3 `joints`, 4 `soft_bodies`. Older files load
-    /// unchanged.
-    pub const VERSION: u32 = 4;
+    /// 2 added `fluid`, 3 `joints`, 4 `soft_bodies`, 5 `gas`. Older files
+    /// load unchanged.
+    pub const VERSION: u32 = 5;
     pub const OLDEST_SUPPORTED: u32 = 1;
 
     pub fn from_world(world: &World) -> Self {
@@ -71,6 +71,10 @@ impl Scene {
             body.orientation = body.orientation.normalize();
         }
         scene.world.fluid.validate().map_err(SceneError::Invalid)?;
+        if let Some(gas) = scene.world.gas.as_mut() {
+            gas.validate().map_err(SceneError::Invalid)?;
+            gas.fill_missing();
+        }
         for (i, s) in scene.world.soft_bodies.iter_mut().enumerate() {
             s.validate()
                 .map_err(|e| SceneError::Invalid(format!("soft body {i}: {e}")))?;
