@@ -199,6 +199,7 @@ struct Persisted {
     snap: bool,
     time_scale: f32,
     step_hz: u32,
+    use_gpu: bool,
     /// The scene as it was when the app closed, as scene JSON.
     scene: Option<String>,
 }
@@ -216,6 +217,7 @@ impl Default for Persisted {
             snap: false,
             time_scale: 1.0,
             step_hz: 120,
+            use_gpu: false,
             scene: None,
         }
     }
@@ -255,6 +257,15 @@ pub struct EditorApp {
     /// Cursor position over the canvas, m. Updated while drawing the canvas
     /// and shown in the status bar on the next frame.
     cursor_world: Option<Vec2>,
+
+    /// Fluid particles are drawn by the GPU renderer (`particles.rs`) when
+    /// eframe runs on wgpu; otherwise with egui circles.
+    gpu_render: bool,
+    /// The GPU fluid solver, if this machine can run it (desktop only).
+    #[cfg(not(target_arch = "wasm32"))]
+    gpu_solver: Option<gpu::GpuSolver>,
+    /// Use the GPU solver when it's available.
+    use_gpu: bool,
 }
 
 impl EditorApp {
@@ -266,7 +277,56 @@ impl EditorApp {
             .unwrap_or_default();
         let mut app = Self::from_persisted(persisted);
         app.history.rebase(&app.world);
+        app.gpu_render = crate::particles::ParticleRenderer::install(cc);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            app.gpu_solver = cc.wgpu_render_state.as_ref().and_then(|rs| {
+                let compute = rs
+                    .adapter
+                    .get_downlevel_capabilities()
+                    .flags
+                    .contains(eframe::egui_wgpu::wgpu::DownlevelFlags::COMPUTE_SHADERS);
+                compute.then(|| {
+                    gpu::GpuSolver::new(
+                        rs.device.clone(),
+                        rs.queue.clone(),
+                        rs.adapter.get_info().name,
+                    )
+                })
+            });
+        }
         app
+    }
+
+    /// Advance the world one fixed step with the chosen fluid solver.
+    fn step_world(&mut self) {
+        let dt = self.timestep.dt;
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.use_gpu
+            && let Some(solver) = self.gpu_solver.as_mut()
+        {
+            self.world.step_with(dt, solver);
+            return;
+        }
+        self.world.step(dt);
+    }
+
+    /// The GPU's name, if the GPU fluid solver can be used here.
+    fn gpu_name(&self) -> Option<&str> {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(solver) = &self.gpu_solver {
+            return Some(solver.adapter_name());
+        }
+        None
+    }
+
+    /// Which fluid solver the next step will use.
+    fn solver_label(&self) -> &'static str {
+        if self.use_gpu && self.gpu_name().is_some() {
+            "GPU"
+        } else {
+            "CPU"
+        }
     }
 
     fn from_persisted(p: Persisted) -> Self {
@@ -302,6 +362,10 @@ impl EditorApp {
             pending_open: io::PendingFile::default(),
             status,
             cursor_world: None,
+            gpu_render: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            gpu_solver: None,
+            use_gpu: p.use_gpu,
         }
     }
 
@@ -317,6 +381,7 @@ impl EditorApp {
             snap: self.snap,
             time_scale: self.time_scale,
             step_hz: (1.0 / self.timestep.dt).round() as u32,
+            use_gpu: self.use_gpu,
             scene: Some(self.scene_json()),
         }
     }
@@ -345,7 +410,7 @@ impl EditorApp {
     fn step_once(&mut self) {
         self.pause();
         self.history.record(&self.world);
-        self.world.step(self.timestep.dt);
+        self.step_world();
         self.history.rebase(&self.world);
     }
 
@@ -579,7 +644,7 @@ impl eframe::App for EditorApp {
             let frame_time = ctx.input(|i| i.stable_dt).min(0.1) * self.time_scale;
             let steps = self.timestep.advance(frame_time);
             for _ in 0..steps {
-                self.world.step(self.timestep.dt);
+                self.step_world();
             }
             self.steps_last_frame = steps;
         }

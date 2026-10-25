@@ -35,7 +35,7 @@ pub mod world;
 
 pub use body::{BodyHandle, BodyId, RigidBody};
 pub use collision::{ContactPoint, Manifold};
-pub use fluid::{Fluid, FluidParams};
+pub use fluid::{BodyImpulse, CpuSolver, Fluid, FluidParams, FluidSolver};
 pub use glam::Vec2;
 pub use scene::{Scene, SceneError};
 pub use shape::Shape;

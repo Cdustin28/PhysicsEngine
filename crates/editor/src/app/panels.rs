@@ -435,6 +435,7 @@ impl EditorApp {
     }
 
     pub(super) fn fluid_panel(&mut self, ui: &mut Ui) {
+        let gpu_name = self.gpu_name().map(str::to_owned);
         let fluid = &mut self.world.fluid;
         let header = if fluid.is_empty() {
             "Fluid".to_owned()
@@ -492,6 +493,20 @@ impl EditorApp {
                     });
                     ui.end_row();
                 });
+                match &gpu_name {
+                    Some(name) => {
+                        ui.checkbox(&mut self.use_gpu, "Simulate on the GPU")
+                            .on_hover_text(format!("Run the fluid solver as compute shaders on {name}."));
+                    }
+                    None => {
+                        ui.add_enabled(false, egui::Checkbox::new(&mut false, "Simulate on the GPU"))
+                            .on_disabled_hover_text(if cfg!(target_arch = "wasm32") {
+                                "The GPU fluid solver needs the desktop app for now."
+                            } else {
+                                "This GPU (or driver) doesn't support compute shaders."
+                            });
+                    }
+                }
                 ui.checkbox(&mut self.show_fluid_forces, "Show forces on bodies")
                     .on_hover_text(
                         "An arrow from each body's center showing the fluid's push (buoyancy and drag), \
@@ -520,9 +535,10 @@ impl EditorApp {
             if !self.world.fluid.is_empty() {
                 ui.separator();
                 ui.label(format!(
-                    "{} particles · {} substeps",
+                    "{} particles · {} substeps · {}",
                     self.world.fluid.len(),
-                    self.world.fluid.stats.substeps
+                    self.world.fluid.stats.substeps,
+                    self.solver_label()
                 ));
             }
             ui.separator();

@@ -1,0 +1,24 @@
+[package]
+name = "gpu"
+description = "GPU (wgpu compute shader) implementation of the engine's SPH fluid solver."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+engine = { path = "../engine" }
+# Same major version as eframe's renderer, so the editor can share its device.
+wgpu = "30"
+bytemuck = { version = "1", features = ["derive"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+pollster = "0.4"
+
+[features]
+# Multithreaded CPU solver, for fair comparisons in the benchmark.
+parallel = ["engine/parallel"]
+
+[lints]
+workspace = true

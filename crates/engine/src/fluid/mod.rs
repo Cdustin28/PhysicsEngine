@@ -69,13 +69,13 @@ macro_rules! iter {
 }
 
 /// CFL safety factor λ in dt ≤ λ·d / (c + v_max).
-const CFL: f32 = 0.4;
+pub const CFL: f32 = 0.4;
 /// Particles are never allowed to move faster than this fraction of the
 /// speed of sound. Past that, WCSPH is meaningless anyway, and the cap
 /// bounds the number of substeps per world step.
-const MAX_SPEED_FRACTION: f32 = 0.5;
+pub const MAX_SPEED_FRACTION: f32 = 0.5;
 /// Exponent of the Tait equation; 7 is the standard value for water.
-const TAIT_GAMMA: i32 = 7;
+pub const TAIT_GAMMA: i32 = 7;
 /// Boundary particle spacing as a fraction of fluid particle spacing.
 /// Denser than the fluid so particles can't squeeze through gaps.
 pub const BOUNDARY_SPACING_FACTOR: f32 = 0.5;
@@ -167,6 +167,19 @@ impl FluidParams {
         self.rest_density / sum
     }
 
+    /// The speed cap: particles never move faster than this, m/s.
+    pub fn max_speed(&self) -> f32 {
+        MAX_SPEED_FRACTION * self.speed_of_sound
+    }
+
+    /// Smallest number of equal substeps that satisfies the CFL condition
+    /// for a `dt` world step even at the speed cap. Solvers that can't cheaply
+    /// check the fastest particle every substep (the GPU) use this.
+    pub fn worst_case_substeps(&self, dt: f32) -> u32 {
+        let limit = CFL * self.particle_spacing / (self.speed_of_sound + self.max_speed());
+        ((dt / limit).ceil() as u32).max(1)
+    }
+
     /// Tait stiffness B = ρ₀ c² / γ, N/m.
     pub fn stiffness(&self) -> f32 {
         self.rest_density * self.speed_of_sound * self.speed_of_sound / TAIT_GAMMA as f32
@@ -201,6 +214,48 @@ impl FluidParams {
 pub struct BodyImpulse {
     pub linear: Vec2,
     pub angular: f32,
+}
+
+/// Advances a [`Fluid`] by one world step. [`CpuSolver`] is the reference
+/// implementation; the `gpu` crate provides a compute-shader one. They must
+/// agree, which the GPU crate's tests check.
+pub trait FluidSolver {
+    /// Advance `fluid` by `dt` seconds with `boundary` as the bodies, and
+    /// return the impulse the fluid exerted on each of the `body_count`
+    /// bodies (see [`Fluid::step`]).
+    fn step(
+        &mut self,
+        fluid: &mut Fluid,
+        boundary: &Boundary,
+        gravity: Vec2,
+        dt: f32,
+        body_count: usize,
+    ) -> Vec<BodyImpulse>;
+
+    /// Short name for display ("CPU", "GPU").
+    fn name(&self) -> &str;
+}
+
+/// The CPU solver: [`Fluid::step`], multithreaded with the `parallel`
+/// feature.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CpuSolver;
+
+impl FluidSolver for CpuSolver {
+    fn step(
+        &mut self,
+        fluid: &mut Fluid,
+        boundary: &Boundary,
+        gravity: Vec2,
+        dt: f32,
+        body_count: usize,
+    ) -> Vec<BodyImpulse> {
+        fluid.step(boundary, gravity, dt, body_count)
+    }
+
+    fn name(&self) -> &str {
+        "CPU"
+    }
 }
 
 /// Diagnostics from the most recent step.
@@ -309,6 +364,34 @@ impl Fluid {
     /// Pressure of each particle from the last substep, N/m.
     pub fn pressures(&self) -> &[f32] {
         &self.scratch.pressures
+    }
+
+    /// For solvers outside this crate: store the densities and pressures a
+    /// step computed (so coloring and diagnostics work) and update the
+    /// statistics.
+    pub fn record_external_step(
+        &mut self,
+        densities: Vec<f32>,
+        pressures: Vec<f32>,
+        substeps: u32,
+    ) {
+        let rho0 = self.params.rest_density;
+        let (mut max_c, mut sum_c, mut count) = (0.0_f32, 0.0_f32, 0_u32);
+        for &rho in &densities {
+            let compression = rho / rho0 - 1.0;
+            if compression > 0.0 {
+                max_c = max_c.max(compression);
+                sum_c += compression;
+                count += 1;
+            }
+        }
+        self.stats = FluidStats {
+            substeps,
+            max_compression: max_c,
+            mean_compression: if count > 0 { sum_c / count as f32 } else { 0.0 },
+        };
+        self.scratch.densities = densities;
+        self.scratch.pressures = pressures;
     }
 
     pub fn validate(&self) -> Result<(), String> {
@@ -481,7 +564,7 @@ impl Fluid {
     /// then touch a few contiguous chunks of memory instead of jumping all
     /// over the arrays. It costs little, doesn't change the physics, and
     /// matters once the particle count outgrows the CPU cache.
-    fn sort_spatially(&mut self) {
+    pub fn sort_spatially(&mut self) {
         let inv = 1.0 / self.params.support();
         let key = |p: Vec2| ((p.y * inv).floor() as i32, (p.x * inv).floor() as i32);
         let mut order: Vec<u32> = (0..self.positions.len() as u32).collect();

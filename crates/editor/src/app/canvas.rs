@@ -5,6 +5,7 @@ use super::{
     MAX_THROW_SPEED, MIN_HALF_SIZE, PRESSURE_COLOR_DEPTH, ROTATE_HANDLE_OFFSET_PX,
     SPEED_COLOR_SCALE, STATIC_FILL, Tool, WATER_DEEP, WATER_LIGHT,
 };
+use crate::particles::{Instance, ParticleCallback, color_bytes};
 use eframe::egui::{self, Color32, PointerButton, Pos2, Rect, Sense, Stroke, Ui};
 use engine::{BodyId, RigidBody, Shape, Vec2};
 
@@ -424,23 +425,44 @@ impl EditorApp {
         let pressures = fluid.pressures();
         let full_pressure =
             fluid.params.rest_density * engine::STANDARD_GRAVITY * PRESSURE_COLOR_DEPTH;
-        let visible = viewport.expand(radius);
-        for (i, &p) in fluid.positions.iter().enumerate() {
-            let at = self.camera.world_to_screen(viewport, p);
-            if !visible.contains(at) {
-                continue;
-            }
+        let color = |i: usize| {
             let t = match self.color_by {
                 ColorBy::Speed => {
                     fluid.velocities.get(i).map_or(0.0, |v| v.length()) / SPEED_COLOR_SCALE
                 }
                 ColorBy::Pressure => pressures.get(i).map_or(0.0, |&q| q / full_pressure),
             };
-            painter.circle_filled(
-                at,
+            lerp_color(WATER_DEEP, WATER_LIGHT, t.clamp(0.0, 1.0))
+        };
+
+        if self.gpu_render {
+            // One instanced draw call on the GPU (see particles.rs).
+            let instances = fluid
+                .positions
+                .iter()
+                .enumerate()
+                .map(|(i, p)| Instance {
+                    position: p.to_array(),
+                    color: color_bytes(color(i)),
+                })
+                .collect();
+            let callback = ParticleCallback::new(
+                instances,
+                viewport,
+                self.camera.center,
+                self.camera.pixels_per_meter,
                 radius,
-                lerp_color(WATER_DEEP, WATER_LIGHT, t.clamp(0.0, 1.0)),
             );
+            painter.add(callback.into_shape(viewport));
+            return;
+        }
+
+        let visible = viewport.expand(radius);
+        for (i, &p) in fluid.positions.iter().enumerate() {
+            let at = self.camera.world_to_screen(viewport, p);
+            if visible.contains(at) {
+                painter.circle_filled(at, radius, color(i));
+            }
         }
     }
 

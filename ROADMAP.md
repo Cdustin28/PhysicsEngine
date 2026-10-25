@@ -142,17 +142,22 @@ These apply to every milestone.
 
 ---
 
-## M5: Performance and GPU
+## M5: Performance and GPU ✅ (performance target unverified)
 
 **Goal:** move from thousands to 100k+ particles.
 
-- [ ] Benchmarks with `criterion` for the neighbor search and the SPH step
-- [ ] Port the SPH step to wgpu compute shaders (WGSL), with GPU neighbor search via counting sort on cell index
-- [ ] Render particles with a custom wgpu pipeline through an egui paint callback (instanced quads), instead of one egui shape per particle
-- [ ] Keep the CPU path as a fallback and as a correctness reference: GPU results must match within a tolerance
-- [ ] Web: compute only where WebGPU is available, with automatic fallback to CPU
+- [x] **Benchmarks** (`cargo bench -p engine`, Criterion): neighbor grid build and query (5k points), a dam-break world step, and a pyramid world step. Build machine, single-threaded: grid build 54 µs, grid query 327 µs, dam-break step (1.5k particles) 9.8 ms, pyramid step 151 µs.
+- [x] **`FluidSolver` interface:** `World::step_with(dt, &mut solver)`. `CpuSolver` is the reference; the engine stays free of graphics dependencies.
+- [x] **GPU SPH** (`crates/gpu`, `sph.wgsl`): six compute passes per substep (clear, insert, density, forces, boundary impulse, integrate). The neighbor grid is a hashed table of per-bucket linked lists built with `atomicExchange` in one pass, chosen over a counting sort because it needs no prefix sum and is simpler to verify. Buffers are packed into vec4s to fit WebGPU's limit of 8 storage buffers per stage. M3 coupling runs on the GPU too: each boundary particle accumulates its reaction impulse, and the CPU sums those into body forces and torques.
+- [x] **CPU path kept as fallback and reference; GPU agrees with it.** `crates/gpu/tests/agreement.rs` checks one step from the same state (worst position difference 0.00003 m, 0.001 spacings; mean density identical to 4 digits), the hydrostatic gradient, Archimedes floating, and exact momentum exchange. They run in CI on lavapipe (software Vulkan) and skip only if no adapter exists at all.
+- [x] **GPU particle rendering** (`crates/editor/src/particles.rs`): one instanced draw call through an egui paint callback, replacing per-particle egui circles. Works on every wgpu backend, including WebGL2.
+- [x] **Editor:** Fluid panel → *Simulate on the GPU* (desktop, when the adapter supports compute shaders); the status bar shows which solver is running
+- [ ] **Web GPU compute:** not yet. The GPU solver reads results back by blocking until the GPU finishes, which browsers forbid. The web build therefore uses the CPU solver (GPU rendering still works). It needs an asynchronous, one-frame-delayed readback.
+- [ ] **Done when (100k particles interactive on a discrete GPU):** *not verified.* The build machine has no GPU; on lavapipe (a GPU emulated on 2 CPU cores) the GPU path is slower than the native CPU solver, which says nothing about real hardware. Run `cargo run --release -p gpu --example bench_gpu --features parallel` on your machine for real numbers at 5k, 20k, and 100k.
 
-**Done when:** 100k particles at interactive rates on a discrete GPU, and the CPU and GPU paths agree in tests.
+**Known costs to revisit if the benchmark disappoints:** 78 compute passes per world step (could be fused); a full upload and readback every world step (could stay on the GPU between steps when not editing); the worst-case substep count (13 vs 9–12 adaptive on the CPU).
+
+**Sleeping** (deferred from M1) is still open; it matters most for large rigid-body scenes.
 
 ---
 

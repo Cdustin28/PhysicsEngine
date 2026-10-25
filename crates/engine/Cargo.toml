@@ -13,6 +13,13 @@ serde.workspace = true
 serde_json.workspace = true
 rayon = { version = "1.12", optional = true }
 
+[dev-dependencies]
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "engine"
+harness = false
+
 [features]
 # Multithreaded fluid on desktop. Off by default, so the web build and
 # `cargo test -p engine` stay single-threaded and fully deterministic.
