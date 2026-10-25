@@ -2,9 +2,9 @@
 
 A rigid-body and particle-fluid physics engine with an interactive editor, written in Rust, in 2D and 3D. It runs on Windows, macOS, Linux, and in the browser.
 
-Website: [physicsengine.dev](https://physicsengine.dev) · Simulator in your browser: [physicsengine.dev/sim](https://physicsengine.dev/sim/) · Plan: [ROADMAP.md](ROADMAP.md)
+Website: [physicsengine.dev](https://physicsengine.dev) · Simulator in your browser: [physicsengine.dev/sim](https://physicsengine.dev/sim/) · Validation: [physicsengine.dev/validation](https://physicsengine.dev/validation/) · Plan: [ROADMAP.md](ROADMAP.md)
 
-> **Status:** milestone M9. In 2D and 3D, rigid bodies (boxes and circles or spheres) collide, stack, bounce, roll, and slide with friction, and can be joined by pins, rods, ropes, springs, and chains; soft blobs, jelly, and cloth deform and push them around; smoke and hot air rise around them; SPH water flows around them, and bodies float, sink, and get pushed by it, on the CPU or (desktop) the GPU. The editor switches between 2D and 3D, has undo, and runs in the browser. A validation page (M10) is next.
+> **Status:** milestone M10. In 2D and 3D, rigid bodies (boxes and circles or spheres) collide, stack, bounce, roll, and slide with friction, and can be joined by pins, rods, ropes, springs, and chains; soft blobs, jelly, and cloth deform and push them around; smoke and hot air rise around them; SPH water flows around them, and bodies float, sink, and get pushed by it, on the CPU or (desktop) the GPU. The editor switches between 2D and 3D, has undo, and runs in the browser. A [validation page](https://physicsengine.dev/validation/) runs both engines against exact physics on every deploy.
 
 ## Running it
 
@@ -99,13 +99,15 @@ crates/
     tests/soft3d.rs    soft-body validation (Hooke's law, volume, cloth draping, momentum)
     tests/gas3d.rs     smoke/heat validation (heat diffusion, buoyancy, hydrostatics)
   gpu/      the SPH solvers as wgpu compute shaders (sph.wgsl, sph3d.wgsl); tests check they agree with the CPU
+  validation/ runs the engines against exact results and writes physicsengine.dev/validation
+            (cargo run --release -p validation [-- OUTPUT_DIR]; exits non-zero if a check fails)
   editor/   eframe/egui app: canvas, tools, inspector, GPU particle renderer, and the 3D view
             (src/view3d: orbit camera, instanced mesh renderer). Builds native and wasm.
 scenes/     example scene files
 index.html  physicsengine.dev landing page
 .github/workflows/
   ci.yml      fmt, clippy, tests, desktop + web builds
-  deploy.yml  publishes physicsengine.dev from main (landing page, /sim/, /scenes/)
+  deploy.yml  publishes physicsengine.dev from main (landing page, /sim/, /scenes/, /validation/)
 ```
 
 Units are SI throughout: meters, kilograms, seconds, radians. 3D density is kg/m³ (water 1000, default body 500, so a default body floats half-submerged). 2D density is kg/m². Water is 10 kg/m² (1000 kg/m³ × 1 cm), the same scale as body densities: a body of density 5 floats half-submerged, and anything above 10 sinks.

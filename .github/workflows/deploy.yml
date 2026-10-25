@@ -4,6 +4,7 @@ name: Deploy site
 #   /         the landing page (index.html)
 #   /sim/     the simulator, built for the browser with Trunk
 #   /scenes/  the example scene files
+#   /validation/  the engines checked against exact physics (crates/validation)
 #
 # One-time setup: in the repository's Settings → Pages, set
 # "Build and deployment → Source" to "GitHub Actions". (The custom domain
@@ -46,6 +47,8 @@ jobs:
           cp index.html CNAME _site/
           cp -r crates/editor/dist _site/sim
           cp -r scenes _site/scenes
+      - name: Run the validation suite and write its page
+        run: cargo run --release -p validation -- _site/validation
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
