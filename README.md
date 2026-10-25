@@ -4,7 +4,7 @@ A rigid-body and particle-fluid physics engine with an interactive editor, writt
 
 Website: [physicsengine.dev](https://physicsengine.dev) · Simulator in your browser: [physicsengine.dev/sim](https://physicsengine.dev/sim/) · Plan: [ROADMAP.md](ROADMAP.md)
 
-> **Status:** milestone M7. In 2D and 3D, rigid bodies (boxes and circles or spheres) collide, stack, bounce, roll, and slide with friction, and can be joined by pins, rods, ropes, springs, and chains; SPH water flows around them, and bodies float, sink, and get pushed by it, on the CPU or (desktop) the GPU. The editor switches between 2D and 3D, has undo, and runs in the browser. Soft bodies (M8) are next.
+> **Status:** milestone M8. In 2D and 3D, rigid bodies (boxes and circles or spheres) collide, stack, bounce, roll, and slide with friction, and can be joined by pins, rods, ropes, springs, and chains; soft blobs, jelly, and cloth deform and push them around; SPH water flows around them, and bodies float, sink, and get pushed by it, on the CPU or (desktop) the GPU. The editor switches between 2D and 3D, has undo, and runs in the browser. Smoke, dye, and heat (M9) are next.
 
 ## Running it
 
@@ -46,9 +46,10 @@ trunk serve --release   # then open http://127.0.0.1:8080
 | Play / pause | Space |
 | Single step | `.` |
 | Reset to before Play | R |
-| Tools | V select · C circle · B box · F fluid · E erase · J joint · L chain · Esc deselect |
+| Tools | V select · C circle · B box · F fluid · E erase · J joint · L chain · S soft body · Esc deselect |
 | Joints | J, then pick Pin (click where two bodies overlap, or on one to pin it to the world) or Rod / Rope / Spring (drag from one body to another, or to empty space) |
 | Chain | L, then drag: each end is pinned to the body under it (or the world) |
+| Soft body | S, choose Blob or Jelly, then click; drag soft bodies with Select |
 | Delete selected | Delete / Backspace |
 | Contact overlay | D, or the checkbox under World |
 | Add water | F, then drag a rectangle (or switch to Brush and paint) |
@@ -66,6 +67,7 @@ Click **3D** at the left of the toolbar. Play/Pause, Step, Reset, Undo/Redo, Exa
 | Add water | W, then click: drops a block of water (size set in the sidebar) onto whatever is under the mouse |
 | Joints | J, then click a body and a second point (another body, or the ground for the world) |
 | Chain | L, then click the two ends |
+| Soft body | S, choose Ball, Cloth (optionally pinned), or Jelly, then click |
 | Move | Left-drag a body across the ground plane · Shift+left-drag to raise or lower it · release while playing to throw |
 | Orbit | Right-drag |
 | Pan | Shift+right-drag or middle-drag |
@@ -85,11 +87,13 @@ crates/
     tests/fluid.rs     fluid validation (hydrostatics, dam break, leaks)
     tests/coupling.rs  fluid ↔ body validation (Archimedes, momentum exchange)
     tests/joints.rs    joint validation (pendulum period, energy, springs, ropes, chains)
+    tests/soft.rs      soft-body validation (Hooke's law, area, momentum, energy)
     examples/          make_scenes (regenerate scenes/), bench_fluid (performance)
   engine3d/ 3D: spheres and boxes, SAT contacts, patch friction, SPH water, ray casts, scenes.
     tests/physics3d.rs validation against closed-form answers (sliding, rolling, bouncing, stacking)
     tests/fluid3d.rs   fluid validation (hydrostatics, leaks, Archimedes, momentum exchange)
     tests/joints3d.rs  joint validation (pendulums incl. conical, springs, chains)
+    tests/soft3d.rs    soft-body validation (Hooke's law, volume, cloth draping, momentum)
   gpu/      the SPH solvers as wgpu compute shaders (sph.wgsl, sph3d.wgsl); tests check they agree with the CPU
   editor/   eframe/egui app: canvas, tools, inspector, GPU particle renderer, and the 3D view
             (src/view3d: orbit camera, instanced mesh renderer). Builds native and wasm.

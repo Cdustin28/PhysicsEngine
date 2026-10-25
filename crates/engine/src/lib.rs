@@ -31,6 +31,7 @@ pub mod joint;
 pub mod presets;
 pub mod scene;
 pub mod shape;
+pub mod soft;
 pub mod solver;
 pub mod world;
 
@@ -41,6 +42,7 @@ pub use glam::Vec2;
 pub use joint::{Joint, JointKind};
 pub use scene::{Scene, SceneError};
 pub use shape::Shape;
+pub use soft::{SoftBody, SoftSettings};
 pub use solver::SolverSettings;
 pub use world::{FixedTimestep, World};
 

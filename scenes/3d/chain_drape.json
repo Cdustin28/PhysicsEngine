@@ -1,6 +1,6 @@
 {
   "format": "physicsengine-scene-3d",
-  "version": 3,
+  "version": 4,
   "world": {
     "gravity": [0.0, -9.80665, 0.0],
     "bodies": [
@@ -539,6 +539,9 @@
         "local_anchor_a": [0.10449931, 0.0, -3.7252903e-9],
         "anchor_b": [-0.10449931, 0.0, 3.7252903e-9]
       }
-    ]
+    ],
+    "soft": {
+      "substeps": 20
+    }
   }
 }

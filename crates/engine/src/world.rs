@@ -5,6 +5,7 @@ use crate::broad_phase;
 use crate::collision::{self, Manifold};
 use crate::fluid::{CpuSolver, Fluid, FluidSolver};
 use crate::joint::Joint;
+use crate::soft::{self, SoftBody, SoftSettings};
 use crate::solver::{self, SolverSettings};
 use glam::Vec2;
 use serde::{Deserialize, Serialize};
@@ -27,6 +28,12 @@ pub struct World {
     /// when there are none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub joints: Vec<Joint>,
+    /// Deformable bodies (see [`crate::soft`]). Left out of scene files
+    /// when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub soft_bodies: Vec<SoftBody>,
+    #[serde(default)]
+    pub soft: SoftSettings,
     /// Simulated time elapsed, s. Not saved in scene files.
     #[serde(skip)]
     pub time: f64,
@@ -53,6 +60,8 @@ impl PartialEq for World {
             && self.fluid == other.fluid
             && self.solver == other.solver
             && self.joints == other.joints
+            && self.soft_bodies == other.soft_bodies
+            && self.soft == other.soft
     }
 }
 
@@ -71,6 +80,8 @@ impl World {
             fluid: Fluid::default(),
             solver: SolverSettings::default(),
             joints: Vec::new(),
+            soft_bodies: Vec::new(),
+            soft: SoftSettings::default(),
             time: 0.0,
             contacts: Vec::new(),
             fluid_forces: Vec::new(),
@@ -186,6 +197,11 @@ impl World {
             .map(RigidBody::kinetic_energy)
             .sum::<f32>()
             + self.fluid.kinetic_energy()
+            + self
+                .soft_bodies
+                .iter()
+                .map(SoftBody::kinetic_energy)
+                .sum::<f32>()
     }
 
     /// Total linear momentum of the dynamic bodies, kg·m/s.
@@ -263,6 +279,15 @@ impl World {
             }
             self.rigid_substep(h);
         }
+        // Soft bodies last, against the rigid bodies' new positions (which
+        // they can push).
+        soft::step(
+            &mut self.soft_bodies,
+            &mut self.bodies,
+            self.gravity,
+            dt,
+            &self.soft,
+        );
         self.time += f64::from(dt);
     }
 

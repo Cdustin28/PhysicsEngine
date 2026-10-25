@@ -104,6 +104,7 @@ impl Editor3d {
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut self.tool, Tool::Joint, "Joint (J)");
                 ui.selectable_value(&mut self.tool, Tool::Chain, "Chain (L)");
+                ui.selectable_value(&mut self.tool, Tool::Soft, "Soft (S)");
             });
             self.tool_options(ui);
 
@@ -115,12 +116,16 @@ impl Editor3d {
 
             ui.separator();
             ui.heading("Selection");
+            if let Some(i) = self.selected_soft {
+                self.soft_inspector(ui, i);
+            }
             match self.selected() {
                 Some(id) => {
                     if self.inspector(ui, id) {
                         self.delete_selected();
                     }
                 }
+                None if self.selected_soft.is_some() => {}
                 None => {
                     ui.weak("Click a body to select it.");
                 }
@@ -162,6 +167,7 @@ impl Editor3d {
                 ui.weak("Click in the view to place.");
             }
             Tool::Joint => self.joint_tool_options(ui),
+            Tool::Soft => self.soft_tool_options(ui),
             Tool::Chain => self.chain_tool_options(ui),
             Tool::Water => {
                 egui::Grid::new("new_water3d")
@@ -393,6 +399,13 @@ impl Editor3d {
                     self.chain_click(rect, p);
                 }
             }
+            Tool::Soft => {
+                if response.clicked_by(PointerButton::Primary)
+                    && let Some(p) = response.interact_pointer_pos()
+                {
+                    self.place_soft(rect, p);
+                }
+            }
         }
 
         // --- Drawing.
@@ -424,23 +437,45 @@ impl Editor3d {
             let press = ui
                 .input(|i| i.pointer.press_origin())
                 .or(response.hover_pos());
-            self.grab = press.and_then(|p| self.start_grab(rect, p, shift));
+            // A soft body in front of every rigid body is dragged across a
+            // horizontal plane through the point grabbed.
+            let soft = press.and_then(|p| self.pick_soft(rect, p).map(|hit| (p, hit)));
+            if let Some((p, (i, t))) = soft {
+                let (origin, dir) = self.camera.ray(rect, p);
+                let point = origin + t * dir;
+                self.selected_soft = Some(i);
+                self.selection = None;
+                self.soft_grab = Some((i, point.y, point));
+            } else {
+                self.grab = press.and_then(|p| self.start_grab(rect, p, shift));
+            }
         }
         if response.dragged_by(PointerButton::Primary)
             && let Some(p) = response.interact_pointer_pos()
         {
             let dt = ui.input(|i| i.stable_dt).max(1e-4);
-            self.continue_grab(rect, p, dt);
+            if self.soft_grab.is_some() {
+                self.continue_soft_grab(rect, p, dt);
+            } else {
+                self.continue_grab(rect, p, dt);
+            }
         }
         if response.drag_stopped_by(PointerButton::Primary) {
             self.grab = None;
+            self.soft_grab = None;
         }
         if response.clicked_by(PointerButton::Primary)
             && let Some(p) = response.interact_pointer_pos()
         {
-            let (origin, dir) = self.camera.ray(rect, p);
-            let hit = self.world.raycast(origin, dir).map(|(id, _)| id);
-            self.select(hit);
+            if let Some((i, _)) = self.pick_soft(rect, p) {
+                self.selected_soft = Some(i);
+                self.selection = None;
+            } else {
+                self.selected_soft = None;
+                let (origin, dir) = self.camera.ray(rect, p);
+                let hit = self.world.raycast(origin, dir).map(|(id, _)| id);
+                self.select(hit);
+            }
         }
     }
 
@@ -528,6 +563,33 @@ impl Editor3d {
         };
     }
 
+    fn continue_soft_grab(&mut self, rect: Rect, p: Pos2, dt: f32) {
+        let Some((i, height, last)) = self.soft_grab else {
+            return;
+        };
+        let (origin, dir) = self.camera.ray(rect, p);
+        let Some(point) = ray_plane(origin, dir, Vec3::new(0.0, height, 0.0), Vec3::Y) else {
+            return;
+        };
+        let Some(s) = self.world.soft_bodies.get_mut(i) else {
+            self.soft_grab = None;
+            return;
+        };
+        let delta = point - last;
+        s.translate(delta);
+        let v = if self.running {
+            (delta / dt).clamp_length_max(MAX_THROW_SPEED)
+        } else {
+            Vec3::ZERO
+        };
+        for (vel, &w) in s.velocities.iter_mut().zip(&s.inv_mass) {
+            if w > 0.0 {
+                *vel = v;
+            }
+        }
+        self.soft_grab = Some((i, height, point));
+    }
+
     /// Place a new body where the mouse points: on top of whatever is there,
     /// or on the ground plane y = 0.
     fn place(&mut self, rect: Rect, p: Pos2) {
@@ -604,6 +666,7 @@ impl Editor3d {
             cubes,
             spheres,
             particles,
+            self.soft_meshes(),
             self.camera.view_proj(rect),
             self.camera.eye(),
         )

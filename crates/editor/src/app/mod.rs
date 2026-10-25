@@ -12,6 +12,7 @@ mod canvas;
 mod io;
 mod joints;
 mod panels;
+mod soft;
 
 pub(crate) use panels::title_case;
 
@@ -74,6 +75,8 @@ enum Tool {
     Joint,
     /// Drag out a chain of pinned links.
     Chain,
+    /// Place a soft blob or jelly block.
+    Soft,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -114,7 +117,9 @@ impl Default for NewBodySettings {
 impl NewBodySettings {
     fn shape(&self, tool: Tool) -> Option<Shape> {
         match tool {
-            Tool::Select | Tool::Fluid | Tool::Erase | Tool::Joint | Tool::Chain => None,
+            Tool::Select | Tool::Fluid | Tool::Erase | Tool::Joint | Tool::Chain | Tool::Soft => {
+                None
+            }
             Tool::Circle => Some(Shape::Circle {
                 radius: self.radius,
             }),
@@ -209,6 +214,7 @@ impl Snapper {
 struct Persisted {
     mode: Mode,
     joint_settings: joints::JointSettings,
+    soft_settings: soft::SoftSettings,
     view3d: Persisted3d,
     camera: Camera,
     new_body: NewBodySettings,
@@ -230,6 +236,7 @@ impl Default for Persisted {
         Self {
             mode: Mode::TwoD,
             joint_settings: joints::JointSettings::default(),
+            soft_settings: soft::SoftSettings::default(),
             view3d: Persisted3d::default(),
             camera: Camera::default(),
             new_body: NewBodySettings::default(),
@@ -280,6 +287,11 @@ pub struct EditorApp {
     joint_drag: Option<(usize, Vec2)>,
     /// Where a chain drag started.
     chain_start: Option<Vec2>,
+    soft_settings: soft::SoftSettings,
+    /// The soft body selected (separately from rigid bodies).
+    selected_soft: Option<usize>,
+    /// Soft body being dragged, and the cursor's last position.
+    soft_drag: Option<(usize, Vec2)>,
 
     /// Text of the "Paste scene JSON" window while it is open.
     paste_buffer: Option<String>,
@@ -412,6 +424,9 @@ impl EditorApp {
             joint_settings: p.joint_settings.clone(),
             joint_drag: None,
             chain_start: None,
+            soft_settings: p.soft_settings.clone(),
+            selected_soft: None,
+            soft_drag: None,
             paste_buffer: None,
             pending_open: io::PendingFile::default(),
             status,
@@ -427,6 +442,7 @@ impl EditorApp {
         Persisted {
             mode: self.mode,
             joint_settings: self.joint_settings.clone(),
+            soft_settings: self.soft_settings.clone(),
             view3d: self.view3d.persisted(),
             camera: self.camera,
             new_body: self.new_body.clone(),
@@ -490,6 +506,8 @@ impl EditorApp {
         self.world = world;
         self.snapshot = None;
         self.selection.clear();
+        self.selected_soft = None;
+        self.soft_drag = None;
         self.drag = None;
         self.timestep.reset();
     }
@@ -519,6 +537,13 @@ impl EditorApp {
         self.snapshot = None;
         let world = &self.world;
         self.selection.retain(|&h| world.find(h).is_some());
+        self.soft_drag = None;
+        if self
+            .selected_soft
+            .is_some_and(|i| i >= self.world.soft_bodies.len())
+        {
+            self.selected_soft = None;
+        }
     }
 
     /// Record an edit if the user has finished one: called at the end of
@@ -529,6 +554,7 @@ impl EditorApp {
             || self.fluid_rect_start.is_some()
             || self.joint_drag.is_some()
             || self.chain_start.is_some()
+            || self.soft_drag.is_some()
             || ctx.input(|i| i.pointer.any_down());
         if !busy {
             self.history.record(&self.world);
@@ -585,6 +611,9 @@ impl EditorApp {
     }
 
     fn delete_selected(&mut self) {
+        if self.delete_selected_soft() {
+            return;
+        }
         let mut ids = self.selected_ids();
         // Remove from the back so earlier indices stay valid.
         ids.sort_unstable_by_key(|id| std::cmp::Reverse(id.0));
@@ -677,6 +706,7 @@ impl EditorApp {
         if pressed(Key::Escape) {
             self.tool = Tool::Select;
             self.selection.clear();
+            self.selected_soft = None;
         }
         if pressed(Key::V) {
             self.tool = Tool::Select;
@@ -698,6 +728,9 @@ impl EditorApp {
         }
         if pressed(Key::L) {
             self.tool = Tool::Chain;
+        }
+        if pressed(Key::S) {
+            self.tool = Tool::Soft;
         }
         if pressed(Key::G) {
             self.snap = !self.snap;

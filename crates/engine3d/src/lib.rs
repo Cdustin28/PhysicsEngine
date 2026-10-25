@@ -19,6 +19,7 @@
 //! - [`world`]: owns the bodies and runs a step
 //! - [`fluid`]: SPH water and its coupling with bodies
 //! - [`joint`]: pins, rods, ropes, springs, chains
+//! - [`soft`]: deformable balls, cloth, and jelly (XPBD)
 //! - [`ray`]: ray casts for picking
 //! - [`scene`], [`presets`]: JSON files and built-in examples
 
@@ -31,6 +32,7 @@ pub mod presets;
 pub mod ray;
 pub mod scene;
 pub mod shape;
+pub mod soft;
 pub mod solver;
 pub mod world;
 
@@ -40,6 +42,7 @@ pub use glam::{Quat, Vec3};
 pub use joint::{Joint, JointKind};
 pub use scene::{Scene, SceneError};
 pub use shape::Shape;
+pub use soft::{SoftBody, SoftSettings};
 pub use solver::SolverSettings;
 pub use world::World;
 

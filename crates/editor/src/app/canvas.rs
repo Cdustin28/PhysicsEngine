@@ -41,6 +41,7 @@ impl EditorApp {
             Tool::Fluid | Tool::Erase => self.fluid_tool_input(ui, &response, viewport),
             Tool::Joint => self.joint_tool_input(ui, &response, cursor_world),
             Tool::Chain => self.chain_tool_input(ui, &response, cursor_world),
+            Tool::Soft => self.soft_tool_input(&response, cursor_world),
             Tool::Circle | Tool::Box => {
                 if response.clicked_by(PointerButton::Primary)
                     && let Some(p) = cursor_world
@@ -89,6 +90,7 @@ impl EditorApp {
             }
         }
 
+        self.draw_soft_bodies(&painter, viewport);
         self.draw_joints(&painter, viewport);
         self.draw_joint_preview(&painter, viewport, cursor_world);
         self.draw_fluid_tool_preview(&painter, viewport, cursor_world);
@@ -129,20 +131,41 @@ impl EditorApp {
             let press = ui
                 .input(|i| i.pointer.press_origin())
                 .or(response.hover_pos());
-            self.drag = press.map(|p| self.start_drag(viewport, p, shift));
+            // A soft body under the press (and no rigid body) is dragged on
+            // its own; otherwise the usual move/rotate/resize/marquee.
+            let on_soft = press
+                .map(|p| self.camera.screen_to_world(viewport, p))
+                .is_some_and(|p| !shift && self.start_soft_drag(p));
+            if !on_soft {
+                self.drag = press.map(|p| self.start_drag(viewport, p, shift));
+            }
         }
         if response.dragged_by(PointerButton::Primary)
             && let Some(pointer) = response.interact_pointer_pos()
         {
             let pointer = self.camera.screen_to_world(viewport, pointer);
             let dt = ui.input(|i| i.stable_dt).max(1e-4);
-            self.continue_drag(pointer, dt);
+            if self.soft_drag.is_some() {
+                self.continue_soft_drag(pointer, dt);
+            } else {
+                self.continue_drag(pointer, dt);
+            }
         }
         if response.drag_stopped_by(PointerButton::Primary) {
+            self.soft_drag = None;
             self.finish_drag();
         }
         if response.clicked_by(PointerButton::Primary) {
-            match cursor_world.and_then(|p| self.world.body_at_point(p)) {
+            let rigid = cursor_world.and_then(|p| self.world.body_at_point(p));
+            self.selected_soft = match rigid {
+                None => cursor_world.and_then(|p| self.soft_at(p)),
+                Some(_) => None,
+            };
+            if self.selected_soft.is_some() {
+                self.selection.clear();
+                return;
+            }
+            match rigid {
                 Some(id) if shift => self.toggle_selected(id),
                 Some(id) => self.select_only(id),
                 None if !shift => self.selection.clear(),

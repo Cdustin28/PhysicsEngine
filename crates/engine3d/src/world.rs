@@ -5,6 +5,7 @@ use crate::broad_phase;
 use crate::collision::{self, Manifold};
 use crate::fluid::{CpuSolver, Fluid, FluidSolver};
 use crate::joint::Joint;
+use crate::soft::{self, SoftBody, SoftSettings};
 use crate::solver::{self, SolverSettings};
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
@@ -26,6 +27,11 @@ pub struct World {
     /// Joints between bodies. Left out of scene files when there are none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub joints: Vec<Joint>,
+    /// Deformable bodies. Left out of scene files when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub soft_bodies: Vec<SoftBody>,
+    #[serde(default)]
+    pub soft: SoftSettings,
     /// SPH water. Left out of scene files when unused.
     #[serde(default, skip_serializing_if = "Fluid::is_unused")]
     pub fluid: Fluid,
@@ -49,6 +55,8 @@ impl PartialEq for World {
             && self.solver == other.solver
             && self.fluid == other.fluid
             && self.joints == other.joints
+            && self.soft_bodies == other.soft_bodies
+            && self.soft == other.soft
     }
 }
 
@@ -66,6 +74,8 @@ impl World {
             bodies: Vec::new(),
             solver: SolverSettings::default(),
             joints: Vec::new(),
+            soft_bodies: Vec::new(),
+            soft: SoftSettings::default(),
             fluid: Fluid::default(),
             fluid_forces: Vec::new(),
             time: 0.0,
@@ -149,6 +159,11 @@ impl World {
             .map(RigidBody::kinetic_energy)
             .sum::<f32>()
             + self.fluid.kinetic_energy()
+            + self
+                .soft_bodies
+                .iter()
+                .map(SoftBody::kinetic_energy)
+                .sum::<f32>()
     }
 
     pub fn momentum(&self) -> Vec3 {
@@ -218,6 +233,13 @@ impl World {
             }
             self.rigid_substep(h);
         }
+        soft::step(
+            &mut self.soft_bodies,
+            &mut self.bodies,
+            self.gravity,
+            dt,
+            &self.soft,
+        );
         self.time += f64::from(dt);
     }
 
