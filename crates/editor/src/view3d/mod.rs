@@ -8,7 +8,7 @@
 
 mod gas;
 mod joints;
-mod orbit;
+pub(crate) mod orbit;
 pub mod render;
 mod soft;
 mod ui;

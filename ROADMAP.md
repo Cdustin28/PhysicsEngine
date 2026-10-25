@@ -293,7 +293,7 @@ These apply to every milestone.
 
 ## M10: Validation page
 
-- [x] `crates/validation`: ten scenarios run the real engines and compare with closed-form answers, writing physicsengine.dev/validation (inline SVG charts, no JavaScript) on every deploy. It exits non-zero if any check fails, so a regression blocks the deploy.
+- [x] `crates/validation`: eleven scenarios run the real engines and compare with closed-form answers, writing physicsengine.dev/validation (inline SVG charts, no JavaScript) on every deploy. It exits non-zero if any check fails, so a regression blocks the deploy.
 - [x] Experimental data left out: everything on the page can be re-derived from the formula beside it.
 
 | Scenario | Engine | Theory | Result |
@@ -308,8 +308,30 @@ These apply to every milestone.
 | Floating cubes, 250–750 kg/m³ | 3D SPH + rigid | ρ/ρ_water | within 5.5% |
 | Gaussian heat peak, t = 0.5–5 s | 2D gas | σ₀²/(σ₀² + 2κt) | within 0.5% |
 | Warm patch initial acceleration | 2D / 3D gas | g′/2; 2g′/3 | −2.4%; −1.3% |
+| Orbital period, 0.39–30 AU | N-body orbits | 2π√(a³/GM) | +0.02% |
+| Solar System, 20 years | N-body orbits | energy, angular momentum constant | 1.7 × 10⁻⁸; 2 × 10⁻¹⁴ |
 
 Restitution is applied to the velocity at the start of the contact step, which includes that step's gravity, so balls with e near 1 bounce about 2% above e².
+
+## M11: Orbits ✅
+
+**Goal:** a planetary-system tab: a star, planets, and their moons under real gravity, with distances you can change.
+
+- [x] `engine3d::orbits`: full N-body Newtonian gravity in SI units and `f64` (30 AU is 4.5 × 10¹² m, held to a fraction of a millimeter). Kick-drift-kick leapfrog: symplectic, so energy errors stay bounded. The step is 1/256 of the circular period of the tightest pair, so moons and close passes get small steps automatically. Touching bodies merge, conserving mass and momentum.
+- [x] Editing: add planets (circular orbits) and moons (inside the planet's Hill sphere); set a planet's distance from the star or a moon's from its planet (re-placed on a circular orbit in its current plane; a planet's moons come along, and moving a moon leaves its planet's orbit alone); change mass, radius, color; remove (a planet takes its moons).
+- [x] **Solar System example:** the eight planets at their J2000 positions from JPL's mean orbital elements, plus the Moon, the Galilean moons, Titan, Titania, Oberon, and retrograde Triton. Mars's moons are left out: Phobos's 7.7-hour orbit would need steps 14× shorter than Io's.
+- [x] **Orbits tab** in the editor: 3D view with a top-down option, following any body (double-click), trails drawn relative to each body's parent (so they trace the orbit's shape), decluttered name labels, a scale bar, a live readout (distance, speed, period, eccentricity, inclination), and speeds from 1 hour/s to 10 years/s. When the step budget can't keep up, the status bar says which pair is limiting it. Planets are lit by the star and drawn at true size or a few pixels, whichever is bigger.
+
+| Check (tests/orbits.rs) | Result |
+|---|---|
+| Kepler's third law, 0.4–30 AU | +0.020% at every distance (leapfrog at 256 steps/orbit: (2π/256)²/3) |
+| Earth's year, from the J2000 state | 365.25 d (sidereal 365.256), e = 0.0167 |
+| Moon's month | 27.3 d; still bound after a year with everything pulling on it |
+| Solar System energy / angular momentum, 20 years | < 10⁻⁶ / < 10⁻⁹ |
+| Moving Jupiter to 2 AU | circular (e < 10⁻⁶), Io's orbit unchanged to 10⁻⁹ |
+| Collision | mass and momentum conserved to 10⁻¹² |
+
+Not yet: undo in the Orbits tab, saving systems as files (they're kept between sessions), Mars's moons in the example, and rings.
 
 ## Later
 

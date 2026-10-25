@@ -835,6 +835,94 @@ pub fn buoyant_start() -> Case {
 
 pub type Scenario = fn() -> Case;
 
+// ---------------------------------------------------------------------------
+// Orbits
+
+pub fn kepler() -> Case {
+    use engine3d::orbits::{AU, DAY, G, M_SUN, YEAR, solar_system, sun_only};
+    use std::f64::consts::TAU;
+    // Light test planets, one at a time, from Mercury's distance to
+    // Neptune's. Period measured from the angle swept over two orbits.
+    let mut points = Vec::new();
+    let mut checks = Vec::new();
+    for a_au in [0.387, 0.723, 1.0, 1.524, 5.2, 9.54, 19.2, 30.1] {
+        let mut s = sun_only();
+        let p = s.add_planet("Test", 1e20, 1e6, [255, 255, 255], a_au * AU, 0.0);
+        let angle = |s: &engine3d::orbits::OrbitSystem| {
+            let d = s.bodies[p].position - s.bodies[0].position;
+            d.z.atan2(d.x)
+        };
+        let (mut prev, mut swept) = (angle(&s), 0.0_f64);
+        let target = 2.0 * TAU;
+        let period = loop {
+            let dt = s.stable_dt();
+            s.step(dt);
+            let a = angle(&s);
+            let mut d = a - prev;
+            d -= TAU * (d / TAU).round();
+            if swept.abs() + d.abs() >= target {
+                let frac = (target - swept.abs()) / d.abs();
+                break (s.time - dt + frac * dt) / 2.0;
+            }
+            swept += d;
+            prev = a;
+        };
+        let expected = TAU * ((a_au * AU).powi(3) / (G * (M_SUN + 1e20))).sqrt();
+        points.push((a_au, period / YEAR));
+        if [0.387, 1.0, 30.1].contains(&a_au) {
+            checks.push(check(
+                &format!("Period at {a_au} AU"),
+                expected / YEAR,
+                period / YEAR,
+                5e-4,
+                "years",
+            ));
+        }
+    }
+    // The real Solar System, all bodies pulling on each other, for 20 years.
+    let mut s = solar_system();
+    let (e0, l0) = (s.energy(), s.angular_momentum());
+    let end = 20.0 * YEAR;
+    while s.time < end {
+        s.advance((end - s.time).min(DAY), 100_000);
+    }
+    let de = ((s.energy() - e0) / e0).abs();
+    let dl = (s.angular_momentum() - l0).length() / l0.length();
+    checks.push(Check {
+        quantity: "Solar System energy change, 20 years".into(),
+        expected: "< 10⁻⁶".into(),
+        measured: format!("{de:.1e}"),
+        pass: de < 1e-6,
+    });
+    checks.push(Check {
+        quantity: "Solar System angular momentum change, 20 years".into(),
+        expected: "< 10⁻⁹".into(),
+        measured: format!("{dl:.1e}"),
+        pass: dl < 1e-9,
+    });
+    let curve = (0..=40)
+        .map(|k| {
+            let a = 0.3 * 10f64.powf(k as f64 * 0.05);
+            (a, a.powf(1.5))
+        })
+        .collect();
+    Case {
+        id: "kepler",
+        title: "Kepler's third law",
+        engine: "N-body orbits",
+        explanation: "<p>Planets placed on circular orbits from Mercury's distance to Neptune's, each              timed over two orbits. Kepler's third law says the period grows as the distance to the              1.5 power: T = 2π√(a³/GM), one year at 1 AU. The integrator (leapfrog, at least 256              steps per orbit) runs orbits long by a fixed (2π/256)²/3 = 0.02%, and being              symplectic, its energy error stays bounded instead of drifting: the full Solar              System, with every planet and moon pulling on every other, is checked over 20              years.</p>"
+            .into(),
+        chart: Some(
+            Chart::new("Distance from the Sun (AU)", "Orbital period (years)")
+                .log_log()
+                .with(Series::line("T = a^1.5 (years, AU)", curve, CARDINAL))
+                .with(Series::points("Simulated", points, GOLD))
+                .svg(),
+        ),
+        checks,
+    }
+}
+
 /// Every case, in page order.
 pub fn all() -> Vec<(&'static str, Scenario)> {
     vec![
@@ -848,6 +936,7 @@ pub fn all() -> Vec<(&'static str, Scenario)> {
         ("archimedes", archimedes),
         ("heat", heat_diffusion),
         ("buoyancy", buoyant_start),
+        ("kepler", kepler),
     ]
 }
 

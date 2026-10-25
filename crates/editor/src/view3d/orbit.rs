@@ -6,9 +6,31 @@ use glam::{Mat4, Vec3, Vec4Swizzles as _, camera};
 use serde::{Deserialize, Serialize};
 
 /// Vertical field of view, radians (45°).
-const FOV_Y: f32 = std::f32::consts::FRAC_PI_4;
-const NEAR: f32 = 0.05;
-const FAR: f32 = 500.0;
+pub const FOV_Y: f32 = std::f32::consts::FRAC_PI_4;
+
+/// Zoom range and clip planes. Not saved: each view sets its own.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Limits {
+    pub min_distance: f32,
+    pub max_distance: f32,
+    /// Near and far clip planes as multiples of the camera's distance (the
+    /// orbit view spans 10⁻⁵ to 10³ AU), or `None` for fixed planes.
+    pub relative_clip: Option<(f32, f32)>,
+}
+
+impl Default for Limits {
+    /// The 3D editor: meters, a fixed 0.05–500 m depth range.
+    fn default() -> Self {
+        Self {
+            min_distance: 0.5,
+            max_distance: 200.0,
+            relative_clip: None,
+        }
+    }
+}
+/// Steepest view, radians: just short of straight down (89.4°), where the
+/// look-at "up" direction would be undefined.
+pub const MAX_PITCH: f32 = 1.56;
 /// Radians of orbit per pixel of mouse movement.
 const ORBIT_SPEED: f32 = 0.008;
 
@@ -23,6 +45,8 @@ pub struct OrbitCamera {
     pub pitch: f32,
     /// Distance from the target, m.
     pub distance: f32,
+    #[serde(skip)]
+    pub limits: Limits,
 }
 
 impl Default for OrbitCamera {
@@ -32,6 +56,7 @@ impl Default for OrbitCamera {
             yaw: 0.6,
             pitch: 0.45,
             distance: 16.0,
+            limits: Limits::default(),
         }
     }
 }
@@ -43,11 +68,25 @@ impl OrbitCamera {
         self.target + self.distance * Vec3::new(cp * sy, sp, cp * cy)
     }
 
+    /// Near and far clip distances.
+    fn clip(&self) -> (f32, f32) {
+        match self.limits.relative_clip {
+            Some((near, far)) => (near * self.distance, far * self.distance),
+            None => (0.05, 500.0),
+        }
+    }
+
+    /// World units per screen pixel at distance `depth` from the eye.
+    pub fn units_per_pixel(&self, rect: Rect, depth: f32) -> f32 {
+        2.0 * depth * (FOV_Y * 0.5).tan() / rect.height().max(1.0)
+    }
+
     /// World → clip space for a viewport of the given size.
     pub fn view_proj(&self, rect: Rect) -> Mat4 {
         let aspect = (rect.width() / rect.height().max(1.0)).max(1e-3);
         // wgpu's depth range is [0, 1], the DirectX convention.
-        camera::rh::proj::directx::perspective(FOV_Y, aspect, NEAR, FAR)
+        let (near, far) = self.clip();
+        camera::rh::proj::directx::perspective(FOV_Y, aspect, near, far)
             * camera::rh::view::look_at_mat4(self.eye(), self.target, Vec3::Y)
     }
 
@@ -64,7 +103,7 @@ impl OrbitCamera {
     /// Screen position of a world point, or `None` if it's behind the camera.
     pub fn project(&self, rect: Rect, p: Vec3) -> Option<Pos2> {
         let clip = self.view_proj(rect) * p.extend(1.0);
-        if clip.w <= NEAR {
+        if clip.w <= self.clip().0 {
             return None;
         }
         let ndc = clip.xyz() / clip.w;
@@ -76,7 +115,7 @@ impl OrbitCamera {
 
     pub fn orbit(&mut self, delta: egui::Vec2) {
         self.yaw -= delta.x * ORBIT_SPEED;
-        self.pitch = (self.pitch + delta.y * ORBIT_SPEED).clamp(-1.5, 1.5);
+        self.pitch = (self.pitch + delta.y * ORBIT_SPEED).clamp(-MAX_PITCH, MAX_PITCH);
     }
 
     /// Slide the target so the scene follows the mouse.
@@ -90,7 +129,8 @@ impl OrbitCamera {
     }
 
     pub fn zoom(&mut self, factor: f32) {
-        self.distance = (self.distance * factor).clamp(0.5, 200.0);
+        self.distance =
+            (self.distance * factor).clamp(self.limits.min_distance, self.limits.max_distance);
     }
 }
 

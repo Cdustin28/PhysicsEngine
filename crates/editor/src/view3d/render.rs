@@ -40,7 +40,8 @@ pub struct SoftMeshes {
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct Instance {
     pub position: [f32; 3],
-    /// 1 = draw a 1 m checkerboard (static bodies, so the floor reads as one).
+    /// 1 = draw a 1 m checkerboard (static bodies, so the floor reads as one);
+    /// 2 = emissive (a star: its own color, unlit).
     pub checker: f32,
     /// Box half extents, or the radius three times for a sphere.
     pub scale: [f32; 3],
@@ -192,14 +193,21 @@ fn vs_main(
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     var n = normalize(in.normal);
-    let l = normalize(g.light.xyz);
+    if (in.flags.x > 1.5) {
+        // Emissive: a star lights itself.
+        return vec4<f32>(in.color.rgb, 1.0);
+    }
+    // light.w = 0: a sun direction; 1: a point light at light.xyz (a star),
+    // with no sky light, so night sides are dark.
+    let point = g.light.w > 0.5;
+    let l = select(normalize(g.light.xyz), normalize(g.light.xyz - in.world), point);
     let v = normalize(g.eye.xyz - in.world);
     // Two-sided lighting, so cloth seen from below isn't black.
     if (dot(n, v) < 0.0) {
         n = -n;
     }
     var base = in.color.rgb;
-    if (in.flags.x > 0.5) {
+    if (in.flags.x > 0.5 && in.flags.x < 1.5) {
         let k = floor(in.world.x) + floor(in.world.z);
         if (abs(k - 2.0 * floor(k * 0.5)) > 0.5) {
             base = base * 0.88;
@@ -219,6 +227,11 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let h = normalize(l + v);
     let specular = pow(max(dot(n, h), 0.0), 40.0) * 0.2;
     var rgb = base * (0.22 + 0.25 * sky + 0.6 * diffuse) + vec3<f32>(specular);
+    if (point) {
+        // Enough ambient that a night side seen against the star reads as a
+        // planet, not a hole.
+        rgb = base * (0.2 + 0.85 * diffuse) + vec3<f32>(specular * 0.5);
+    }
     if (in.flags.y > 0.5) {
         // Gold rim on the selected body.
         let rim = pow(1.0 - max(dot(n, v), 0.0), 2.0);
@@ -618,6 +631,13 @@ impl BodyCallback {
                 up: up.extend(0.0).to_array(),
             },
         }
+    }
+
+    /// Light the scene from a point (a star) instead of a distant sun, with
+    /// no sky light.
+    pub fn with_point_light(mut self, position: Vec3) -> Self {
+        self.globals.light = position.extend(1.0).to_array();
+        self
     }
 
     /// Draw the splats by lightening what's behind them (screen blending),
