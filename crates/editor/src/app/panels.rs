@@ -1,12 +1,28 @@
 //! Toolbar, sidebar, inspector, and status bar.
 
-use super::{ColorBy, EditorApp, FluidShape, Tool};
+use super::{ColorBy, EditorApp, FluidShape, Mode, Tool};
 use eframe::egui::{self, Ui};
 use engine::{BodyId, RigidBody, Shape, Vec2, World, presets};
 
 impl EditorApp {
     pub(super) fn toolbar(&mut self, ui: &mut Ui) {
         ui.horizontal_wrapped(|ui| {
+            let mut mode = self.mode;
+            ui.selectable_value(&mut mode, Mode::TwoD, "2D");
+            ui.selectable_value(&mut mode, Mode::ThreeD, "3D");
+            self.set_mode(mode);
+            ui.separator();
+            if self.mode == Mode::ThreeD {
+                self.view3d.toolbar(ui);
+            } else {
+                self.toolbar_2d(ui);
+            }
+            self.file_buttons(ui);
+        });
+    }
+
+    fn toolbar_2d(&mut self, ui: &mut Ui) {
+        {
             if self.running {
                 if ui.button("Pause").on_hover_text("Space").clicked() {
                     self.pause();
@@ -86,6 +102,13 @@ impl EditorApp {
                     title_case(name)
                 );
             }
+        }
+    }
+
+    /// Open, Save, Copy, Paste: shared by both editors.
+    fn file_buttons(&mut self, ui: &mut Ui) {
+        ui.separator();
+        {
             if ui
                 .button("Open…")
                 .on_hover_text("Open a scene file")
@@ -111,7 +134,7 @@ impl EditorApp {
             if ui.button("Paste JSON…").clicked() {
                 self.paste_buffer = Some(String::new());
             }
-        });
+        }
     }
 
     pub(super) fn sidebar(&mut self, ui: &mut Ui) {
@@ -526,6 +549,14 @@ impl EditorApp {
     }
 
     pub(super) fn status_bar(&mut self, ui: &mut Ui) {
+        if self.mode == Mode::ThreeD {
+            ui.horizontal(|ui| {
+                self.view3d.status_bar(ui);
+                ui.separator();
+                ui.weak(&self.status);
+            });
+            return;
+        }
         ui.horizontal(|ui| {
             ui.label(if self.running { "Running" } else { "Paused" });
             ui.separator();
@@ -593,7 +624,7 @@ impl EditorApp {
 }
 
 /// "pyramid" -> "Pyramid", "dam_break" -> "Dam break".
-pub(super) fn title_case(s: &str) -> String {
+pub(crate) fn title_case(s: &str) -> String {
     let mut chars = s.chars();
     chars
         .next()

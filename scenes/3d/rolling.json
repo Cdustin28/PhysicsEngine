@@ -1,0 +1,72 @@
+{
+  "format": "physicsengine-scene-3d",
+  "version": 1,
+  "world": {
+    "gravity": [0.0, -9.80665, 0.0],
+    "bodies": [
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [10.0, 0.25, 10.0]
+        },
+        "position": [0.0, -0.25, 0.0],
+        "orientation": [0.0, 0.0, 0.0, 1.0],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": true
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [3.0, 0.15, 1.0]
+        },
+        "position": [0.0, 3.0, 0.0],
+        "orientation": [0.0, 0.0, 0.1736482, 0.9848078],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.5,
+        "is_static": true
+      },
+      {
+        "shape": {
+          "type": "sphere",
+          "radius": 0.3
+        },
+        "position": [1.7254763, 4.106902, -0.50000006],
+        "orientation": [0.0, 0.0, 0.0, 1.0],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 1.0,
+        "is_static": false
+      },
+      {
+        "shape": {
+          "type": "cuboid",
+          "half_extents": [0.25, 0.25, 0.25]
+        },
+        "position": [1.7425773, 4.0599174, 0.50000006],
+        "orientation": [0.0, 0.0, 0.1736482, 0.9848078],
+        "velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "density": 500.0,
+        "restitution": 0.3,
+        "friction": 0.2,
+        "is_static": false
+      }
+    ],
+    "solver": {
+      "velocity_iterations": 12,
+      "baumgarte": 0.2,
+      "allowed_penetration": 0.005,
+      "restitution_threshold": 1.0,
+      "warm_starting": true
+    }
+  }
+}

@@ -152,7 +152,15 @@ impl ParticleRenderer {
                 })],
             }),
             primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
+            // The render pass has a depth buffer (for the 3D view); particles
+            // ignore it.
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: crate::view3d::render::DEPTH_FORMAT,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::Always),
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
             // eframe renders without multisampling by default.
             multisample: wgpu::MultisampleState::default(),
             multiview_mask: None,

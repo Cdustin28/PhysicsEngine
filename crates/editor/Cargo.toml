@@ -13,6 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 engine = { path = "../engine" }
+engine3d = { path = "../engine3d" }
 # `persistence` remembers settings and the last scene between sessions.
 eframe = { version = "0.37", features = ["persistence"] }
 glam.workspace = true

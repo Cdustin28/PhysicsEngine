@@ -1,10 +1,10 @@
 # PhysicsEngine
 
-A 2D rigid-body and particle-fluid physics engine with an interactive editor, written in Rust. It runs on Windows, macOS, Linux, and in the browser. 3D is planned once 2D is solid.
+A rigid-body and particle-fluid physics engine with an interactive editor, written in Rust: 2D with fluids, and 3D rigid bodies. It runs on Windows, macOS, Linux, and in the browser.
 
 Website: [physicsengine.dev](https://physicsengine.dev) · Simulator in your browser: [physicsengine.dev/sim](https://physicsengine.dev/sim/) · Plan: [ROADMAP.md](ROADMAP.md)
 
-> **Status:** milestone M5. Rigid boxes and circles collide, stack, bounce, and slide with friction. SPH water flows around them, and bodies float, sink, and get pushed by it, on the CPU or (desktop) the GPU. The editor has undo, multi-select, snapping, and runs in the browser. 3D (M6) is next.
+> **Status:** milestone M6a. In 2D, rigid boxes and circles collide, stack, bounce, and slide with friction; SPH water flows around them, and bodies float, sink, and get pushed by it, on the CPU or (desktop) the GPU. In 3D, spheres and boxes collide, stack, roll, and slide. The editor switches between 2D and 3D, has undo, and runs in the browser. 3D fluid (M6b) is next.
 
 ## Running it
 
@@ -53,7 +53,22 @@ trunk serve --release   # then open http://127.0.0.1:8080
 | Erase water | E, then drag |
 | Fluid force arrows | Fluid panel → Show forces on bodies (an arrow the length of the body's weight is 1 m) |
 
-Scenes save as human-readable JSON. **Open…/Save…** use file dialogs on desktop; in the browser, Open uses the browser's file picker and Save downloads `scene.json`. **Copy JSON/Paste JSON…** work everywhere. Your settings and current scene are remembered between sessions. **Examples** loads the built-in scenes (demo, 55-box pyramid, friction ramps, bouncing balls, dam break, buoyancy). The same scenes are in [`scenes/`](scenes); regenerate them with `cargo run -p engine --example make_scenes`.
+### 3D mode
+
+Click **3D** at the left of the toolbar. Play/Pause, Step, Reset, Undo/Redo, Examples, and Open/Save work as in 2D.
+
+| Action | Input |
+| --- | --- |
+| Select | Left-click a body |
+| Place a sphere / box | C or B (or the sidebar), then click: it lands on whatever is under the mouse, or the ground |
+| Move | Left-drag a body across the ground plane · Shift+left-drag to raise or lower it · release while playing to throw |
+| Orbit | Right-drag |
+| Pan | Shift+right-drag or middle-drag |
+| Zoom | Scroll wheel or pinch |
+| Focus on selection | F |
+| Contact overlay | D |
+
+Scenes save as human-readable JSON. **Open…/Save…** use file dialogs on desktop; in the browser, Open uses the browser's file picker and Save downloads `scene.json`. **Copy JSON/Paste JSON…** work everywhere. Your settings and current scene are remembered between sessions. **Examples** loads the built-in scenes (demo, 55-box pyramid, friction ramps, bouncing balls, dam break, buoyancy). The same scenes are in [`scenes/`](scenes) (3D ones in `scenes/3d/`); regenerate them with `cargo run -p engine --example make_scenes` and `cargo run -p engine3d --example make_scenes`. Opening a 3D scene switches the editor to 3D, and vice versa.
 
 ## Layout
 
@@ -65,8 +80,11 @@ crates/
     tests/fluid.rs     fluid validation (hydrostatics, dam break, leaks)
     tests/coupling.rs  fluid ↔ body validation (Archimedes, momentum exchange)
     examples/          make_scenes (regenerate scenes/), bench_fluid (performance)
+  engine3d/ 3D rigid bodies: spheres and boxes, SAT contacts, patch friction, ray casts, scenes.
+    tests/physics3d.rs validation against closed-form answers (sliding, rolling, bouncing, stacking)
   gpu/      the SPH solver as wgpu compute shaders (sph.wgsl); tests check it agrees with the CPU
-  editor/   eframe/egui app: canvas, tools, inspector, GPU particle renderer. Builds native and wasm.
+  editor/   eframe/egui app: canvas, tools, inspector, GPU particle renderer, and the 3D view
+            (src/view3d: orbit camera, instanced mesh renderer). Builds native and wasm.
 scenes/     example scene files
 index.html  physicsengine.dev landing page
 .github/workflows/
@@ -74,7 +92,7 @@ index.html  physicsengine.dev landing page
   deploy.yml  publishes physicsengine.dev from main (landing page, /sim/, /scenes/)
 ```
 
-Units are SI throughout: meters, kilograms, seconds, radians. 2D density is kg/m². Water is 10 kg/m² (1000 kg/m³ × 1 cm), the same scale as body densities: a body of density 5 floats half-submerged, and anything above 10 sinks.
+Units are SI throughout: meters, kilograms, seconds, radians. 3D density is kg/m³ (water 1000). 2D density is kg/m². Water is 10 kg/m² (1000 kg/m³ × 1 cm), the same scale as body densities: a body of density 5 floats half-submerged, and anything above 10 sinks.
 
 The desktop build runs the fluid on all CPU cores (the engine's `parallel` feature), or on the GPU with **Fluid panel → Simulate on the GPU**; the web build uses one CPU core. Fluid particles are drawn by the GPU everywhere. To measure performance on your machine:
 
