@@ -86,7 +86,9 @@ These apply to every milestone.
   - no particle escapes a tank after a 1.5 m dam break slams into the far wall
   - a blob fired at the floor at 8 m/s doesn't tunnel in
   - a moving body pushes still water (and none ends up inside it)
-- [ ] **Performance target (5,000 particles at 60 fps):** *not yet verified.* `cargo run --release -p engine --example bench_fluid` on the 2-core build machine: 4,900 particles take 32 ms per 1/120 s step single-threaded and 21 ms on 2 threads, against 8.3 ms for real time. Scaling suggests roughly 6 ms on an 8-core desktop, which would be real time. Run the benchmark with `--features parallel` on your machine to check. The 1,500-particle Dam break example runs at about real time on one thread. Closing the gap for sure is M5's job.
+- [x] **Performance target (5,000 particles at 60 fps):** met on the GPU, not quite on the CPU. Measured on a desktop with 24 CPU threads and an RTX 3070 Ti, where real time needs ≤ 8.3 ms per 1/120 s step:
+  - `bench_fluid --features parallel` (CPU, 24 threads): 5,040 particles, 11.6 ms per step (139% of real time), 12.7 substeps per step, 0.18 µs per particle-substep. Going from 2 threads (21 ms) to 24 gave only 1.8×: about 210 particles per thread is too little work to hide the per-pass threading overhead, and the neighbor-grid rebuild runs on one thread.
+  - `bench_gpu --features parallel`, dam break: CPU 9.3 ms, **GPU 3.6 ms** at 5,041 particles.
 
 **Lessons worth remembering:**
 - Single-layer boundary particles over-count density within about one spacing of a wall. Fluid placed (or projected) that close is effectively heavily compressed and gets launched. Fills and the projection safety net therefore keep a 0.9-spacing gap.
@@ -143,7 +145,7 @@ These apply to every milestone.
 
 ---
 
-## M5: Performance and GPU ✅ (performance target unverified)
+## M5: Performance and GPU ✅
 
 **Goal:** move from thousands to 100k+ particles.
 
@@ -154,7 +156,15 @@ These apply to every milestone.
 - [x] **GPU particle rendering** (`crates/editor/src/particles.rs`): one instanced draw call through an egui paint callback, replacing per-particle egui circles. Works on every wgpu backend, including WebGL2.
 - [x] **Editor:** Fluid panel → *Simulate on the GPU* (desktop, when the adapter supports compute shaders); the status bar shows which solver is running
 - [ ] **Web GPU compute:** not yet. The GPU solver reads results back by blocking until the GPU finishes, which browsers forbid. The web build therefore uses the CPU solver (GPU rendering still works). It needs an asynchronous, one-frame-delayed readback.
-- [ ] **Done when (100k particles interactive on a discrete GPU):** *not verified.* The build machine has no GPU; on lavapipe (a GPU emulated on 2 CPU cores) the GPU path is slower than the native CPU solver, which says nothing about real hardware. Run `cargo run --release -p gpu --example bench_gpu --features parallel` on your machine for real numbers at 5k, 20k, and 100k.
+- [x] **Done when (100k particles interactive on a discrete GPU):** met. `bench_gpu --features parallel` on an RTX 3070 Ti (24-thread CPU for comparison):
+
+  | Particles | CPU (all cores) | GPU | GPU speed-up |
+  |---|---|---|---|
+  | 5,041 | 9.3 ms | 3.6 ms | 2.6× |
+  | 19,881 | 19.6 ms | 4.0 ms | 4.9× |
+  | 99,856 | 54.6 ms | 11.6 ms | 4.7× |
+
+  At 100k, 11.6 ms per step is about 86 steps a second: interactive, at 72% of real time. The GPU time barely moves from 5k to 20k (3.6 → 4.0 ms), so roughly 3.4 ms per step is fixed cost (dispatching and waiting for the results); each extra particle costs about 0.095 µs.
 
 **Known costs to revisit if the benchmark disappoints:** 78 compute passes per world step (could be fused); a full upload and readback every world step (could stay on the GPU between steps when not editing); the worst-case substep count (13 vs 9–12 adaptive on the CPU).
 

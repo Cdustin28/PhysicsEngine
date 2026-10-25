@@ -6,9 +6,10 @@
   <meta name="description" content="PhysicsEngine.dev – A modern 2D/3D physics engine for simulation, games, and research." />
   <title>PhysicsEngine.dev</title>
   <style>
+    * { box-sizing: border-box; }
     body {
       margin: 0;
-      padding: 0;
+      padding: 32px 16px;
       font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
       background-color: #0f1117;
       color: #f0f0f0;
@@ -16,64 +17,101 @@
       flex-direction: column;
       justify-content: center;
       align-items: center;
-      height: 100vh;
+      min-height: 100vh;
       text-align: center;
     }
     h1 {
       font-size: 3em;
-      margin-bottom: 0.2em;
+      margin: 0 0 0.2em;
       color: #00d8ff;
     }
-    p {
+    p.lede {
       font-size: 1.2em;
       color: #cccccc;
       max-width: 600px;
+      margin: 0 auto;
+    }
+    .menu {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 220px));
+      gap: 16px;
+      justify-content: center;
+      margin-top: 36px;
+    }
+    .mode {
+      display: block;
+      padding: 22px 18px;
+      border: 1px solid #00d8ff;
+      border-radius: 10px;
+      color: #f0f0f0;
+      text-decoration: none;
+      background: rgba(0, 216, 255, 0.06);
+      transition: background 0.2s, transform 0.2s;
+    }
+    .mode:hover, .mode:focus-visible {
+      background: rgba(0, 216, 255, 0.16);
+      transform: translateY(-2px);
+      outline: none;
+    }
+    .mode strong {
+      display: block;
+      font-size: 1.6em;
+      color: #00d8ff;
+      margin-bottom: 6px;
+    }
+    .mode span {
+      font-size: 0.95em;
+      color: #b8bcc4;
+      line-height: 1.4;
+    }
+    .links {
+      margin-top: 28px;
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
     }
     .btn {
-      margin-top: 30px;
       display: inline-block;
-      padding: 12px 24px;
+      padding: 10px 20px;
       font-size: 1em;
-      color: white;
-      background-color: #00d8ff;
-      border: none;
+      color: #00d8ff;
+      border: 1px solid #00d8ff;
       border-radius: 6px;
-      cursor: pointer;
       text-decoration: none;
       transition: background 0.3s;
     }
     .btn:hover {
-      background-color: #00aacc;
-    }
-    .btn + .btn {
-      margin-left: 12px;
-    }
-    .btn.secondary {
-      background-color: transparent;
-      color: #00d8ff;
-      border: 1px solid #00d8ff;
-    }
-    .btn.secondary:hover {
       background-color: rgba(0, 216, 255, 0.12);
     }
-    footer {
-      position: absolute;
-      bottom: 20px;
-      font-size: 0.9em;
-      color: #555;
+    @media (max-width: 720px) {
+      h1 { font-size: 2.2em; }
+      .menu { grid-template-columns: minmax(0, 320px); }
     }
   </style>
 </head>
 <body>
   <main>
     <h1>PhysicsEngine.dev</h1>
-    <p>A high-performance, extensible 2D and 3D physics engine for games, simulation, and fluid dynamics research. Open source, modular, and built for the future.</p>
-    <a class="btn" href="sim/">Launch the simulator</a>
-    <a class="btn secondary" href="validation/">Validation</a>
-    <a class="btn secondary" href="https://github.com/Cdustin28/PhysicsEngine" target="_blank" rel="noopener">View on GitHub</a>
+    <p class="lede">A high-performance, extensible 2D and 3D physics engine for games, simulation, and fluid dynamics research. Open source, modular, and built for the future.</p>
+    <nav class="menu" aria-label="Choose a simulator">
+      <a class="mode" href="sim/?mode=2d">
+        <strong>2D</strong>
+        <span>Rigid bodies, water, joints, soft bodies, smoke and heat</span>
+      </a>
+      <a class="mode" href="sim/?mode=3d">
+        <strong>3D</strong>
+        <span>The same physics in three dimensions</span>
+      </a>
+      <a class="mode" href="sim/?mode=orbits">
+        <strong>Orbits</strong>
+        <span>Planets and moons under real gravity, starting from the Solar System</span>
+      </a>
+    </nav>
+    <div class="links">
+      <a class="btn" href="validation/">Validation</a>
+      <a class="btn" href="https://github.com/Cdustin28/PhysicsEngine" target="_blank" rel="noopener">View on GitHub</a>
+    </div>
   </main>
-  <footer>
-    &copy; 2025&ndash;2026 Cole Dustin
-  </footer>
 </body>
 </html>
