@@ -19,6 +19,7 @@ pub(crate) use panels::title_case;
 
 use crate::camera::Camera;
 use crate::history::History;
+use crate::theme::Theme;
 use crate::view3d::{Editor3d, Persisted3d};
 use eframe::egui::{self, Color32, Key, KeyboardShortcut, Modifiers, Ui};
 use engine::{BodyHandle, BodyId, FixedTimestep, RigidBody, Scene, Shape, Vec2, World};
@@ -28,7 +29,6 @@ use serde::{Deserialize, Serialize};
 const CARDINAL: Color32 = Color32::from_rgb(0xC8, 0x10, 0x2E);
 /// Iowa State gold, used for selection, handles, and previews.
 const GOLD: Color32 = Color32::from_rgb(0xF1, 0xBE, 0x48);
-const STATIC_FILL: Color32 = Color32::from_rgb(0x8A, 0x8D, 0x91);
 /// Contact points and normals in the debug overlay.
 const CONTACT_COLOR: Color32 = Color32::from_rgb(0x1F, 0x4E, 0x9A);
 /// Fluid particle colors: deep blue at rest shading to pale blue when fast
@@ -214,6 +214,7 @@ impl Snapper {
 #[serde(default)]
 struct Persisted {
     mode: Mode,
+    theme: Theme,
     joint_settings: joints::JointSettings,
     soft_settings: soft::SoftSettings,
     gas_settings: gas::GasSettings,
@@ -237,6 +238,7 @@ impl Default for Persisted {
     fn default() -> Self {
         Self {
             mode: Mode::TwoD,
+            theme: Theme::Light,
             joint_settings: joints::JointSettings::default(),
             soft_settings: soft::SoftSettings::default(),
             gas_settings: gas::GasSettings::default(),
@@ -259,6 +261,7 @@ impl Default for Persisted {
 
 pub struct EditorApp {
     mode: Mode,
+    theme: Theme,
     /// The 3D editor (its own world, camera, history).
     view3d: Editor3d,
     world: World,
@@ -322,11 +325,11 @@ pub struct EditorApp {
 
 impl EditorApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        cc.egui_ctx.set_visuals(egui::Visuals::light());
         let persisted = cc
             .storage
             .and_then(|s| eframe::get_value::<Persisted>(s, eframe::APP_KEY))
             .unwrap_or_default();
+        persisted.theme.apply(&cc.egui_ctx);
         let mut app = Self::from_persisted(persisted);
         app.history.rebase(&app.world);
         app.gpu_render = crate::particles::ParticleRenderer::install(cc);
@@ -409,6 +412,7 @@ impl EditorApp {
         };
         Self {
             mode: p.mode,
+            theme: p.theme,
             view3d: Editor3d::new(std::mem::take(&mut p.view3d), false),
             world,
             snapshot: None,
@@ -452,6 +456,7 @@ impl EditorApp {
     fn persisted(&self) -> Persisted {
         Persisted {
             mode: self.mode,
+            theme: self.theme,
             joint_settings: self.joint_settings.clone(),
             soft_settings: self.soft_settings.clone(),
             gas_settings: self.gas_settings.clone(),

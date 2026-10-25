@@ -239,6 +239,7 @@ impl EditorApp {
             return;
         };
         let (nx, ny) = (gas.nx, gas.ny);
+        let [sr, sg, sb] = crate::theme::smoke_rgb(crate::theme::is_dark(ui.ctx()));
         let mut pixels = vec![Color32::TRANSPARENT; nx * ny];
         for j in 0..ny {
             for i in 0..nx {
@@ -249,7 +250,7 @@ impl EditorApp {
                     match self.gas_settings.view {
                         GasView::Smoke => {
                             let a = (gas.smoke[k].min(1.0) * 220.0) as u8;
-                            Color32::from_rgba_unmultiplied(60, 60, 64, a)
+                            Color32::from_rgba_unmultiplied(sr, sg, sb, a)
                         }
                         GasView::Temperature => heat_color(gas.heat[k]),
                     }

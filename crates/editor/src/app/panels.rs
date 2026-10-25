@@ -1,6 +1,7 @@
 //! Toolbar, sidebar, inspector, and status bar.
 
 use super::{ColorBy, EditorApp, FluidShape, Mode, Tool};
+use crate::theme::Theme;
 use eframe::egui::{self, Ui};
 use engine::{BodyId, RigidBody, Shape, Vec2, World, presets};
 
@@ -136,6 +137,16 @@ impl EditorApp {
             if ui.button("Paste JSON…").clicked() {
                 self.paste_buffer = Some(String::new());
             }
+        }
+        ui.separator();
+        let mut dark = self.theme == Theme::Dark;
+        if ui
+            .toggle_value(&mut dark, "Dark mode")
+            .on_hover_text("Switch between the light and dark grey themes")
+            .changed()
+        {
+            self.theme = if dark { Theme::Dark } else { Theme::Light };
+            self.theme.apply(ui.ctx());
         }
     }
 
