@@ -154,7 +154,7 @@ impl FluidSolver for GpuSolver3d {
     ) -> Vec<BodyImpulse> {
         // Several liquids or salt water: the CPU solver handles those
         // (the shaders know only fresh water so far).
-        if !fluid.is_fresh_water() {
+        if !fluid.gpu_can_step() || boundary.has_temperatures() {
             return engine3d::CpuSolver.step(fluid, boundary, gravity, dt, body_count);
         }
         let mut impulses = vec![BodyImpulse::default(); body_count];

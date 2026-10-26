@@ -96,6 +96,34 @@ impl Liquid {
         }
     }
 
+    /// Volumetric thermal expansion coefficient β = −(1/ρ) dρ/dT at `t`
+    /// (K), 1/K. Water's is zero at 4 °C and negative below.
+    pub fn expansion_coefficient(self, t: f32) -> f32 {
+        let (a, b) = (
+            self.expansion_factor(t - 0.5),
+            self.expansion_factor(t + 0.5),
+        );
+        (a - b) / (0.5 * (a + b))
+    }
+
+    /// Heat transfer coefficient between this liquid at `t_liquid` and a
+    /// surface held at `t_wall` (K) by natural convection, W/(m²·K).
+    /// Turbulent natural convection, Nu = 0.13 Ra^(1/3) (between vertical
+    /// walls' 0.10 and an upward-facing heated plate's 0.15; McAdams), with
+    /// properties at the film temperature. With the 1/3 power the plate's
+    /// size cancels, so this needs only the temperatures. For mercury
+    /// (Prandtl number 0.025) it's rough; conduction dominates there anyway.
+    pub fn natural_convection(self, salinity: f32, t_liquid: f32, t_wall: f32) -> f32 {
+        let film = 0.5 * (t_liquid + t_wall);
+        let rho = self.density_at(salinity, film);
+        let k = self.conductivity(salinity);
+        let nu = self.viscosity_at(salinity, film) / rho;
+        let alpha = k / (rho * self.specific_heat(salinity));
+        let beta = self.expansion_coefficient(film).abs();
+        let ra_per_cubic_metre = 9.81 * beta * (t_wall - t_liquid).abs() / (nu * alpha);
+        0.13 * k * ra_per_cubic_metre.cbrt()
+    }
+
     /// Density at `salinity` and temperature `t` (K), kg/m³.
     pub fn density_at(self, salinity: f32, t: f32) -> f32 {
         self.density(salinity) * self.expansion_factor(t)
@@ -125,6 +153,38 @@ impl Liquid {
             Liquid::Water => 4182.0 * (1.0 - 1.29 * salinity.max(0.0)),
             Liquid::Oil => 1970.0,
             Liquid::Mercury => 139.5,
+        }
+    }
+
+    /// The hottest the liquid can get as a liquid at 1 atm, K: water's and
+    /// mercury's boiling points (salt raises water's by about 0.5 K at
+    /// seawater salinity; ebullioscopic constant 0.512 K·kg/mol, two ions
+    /// per NaCl), and for oil its smoke point, where it starts to break
+    /// down.
+    pub fn max_temperature(self, salinity: f32) -> f32 {
+        match self {
+            Liquid::Water => {
+                let molality = salinity.max(0.0) / (0.058_44 * (1.0 - salinity.clamp(0.0, 0.5)));
+                373.15 + 0.512 * 2.0 * molality
+            }
+            Liquid::Oil => 503.15,
+            Liquid::Mercury => 629.88,
+        }
+    }
+
+    /// The coldest the liquid gets before it freezes, K: water's freezing
+    /// point (salt lowers it, cryoscopic constant 1.86 K·kg/mol: seawater
+    /// freezes near −1.9 °C), canola oil's pour point, mercury's melting
+    /// point.
+    pub fn min_temperature(self, salinity: f32) -> f32 {
+        match self {
+            Liquid::Water => {
+                let molality = salinity.max(0.0) / (0.058_44 * (1.0 - salinity.clamp(0.0, 0.5)));
+                // 0.83: the osmotic coefficient of seawater-strength brine.
+                273.15 - 1.86 * 2.0 * molality * 0.83
+            }
+            Liquid::Oil => 263.15,
+            Liquid::Mercury => 234.32,
         }
     }
 

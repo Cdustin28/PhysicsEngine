@@ -351,8 +351,8 @@ Not yet: undo in the Orbits tab, saving systems as files (they're kept between s
 1. [x] CPU speed-up (#16)
 2. [x] **Several liquids** in the 2D and 3D tabs (#17)
 3. [x] **Heat in the liquids** (#18)
-4. [x] **Smooth-surface rendering** (this step; a toggle in 2D and 3D, off by default)
-5. [ ] The Fluids tab: box, placing tools, solids, heat tools, readouts
+4. [x] **Smooth-surface rendering** (#19; a toggle in 2D and 3D, off by default)
+5. [x] **The Fluids tab** (this step): box, placing tools, solids, heat tools, readouts
 6. [ ] Air, boiling, and condensing
 7. [ ] Validation cases
 
@@ -401,6 +401,29 @@ Not yet: undo in the Orbits tab, saving systems as files (they're kept between s
 - [x] Mercury is drawn as a metal: opaque, reflecting about 75% like polished steel. It keeps its own thickness and mean depth, so a clear liquid tints it only when it's in front (oil floating on mercury), not when it's behind.
 - [x] 2D: a metaball surface: each particle adds a smooth bump to a fine density grid (3 cells per spacing), the liquid is wherever the field passes half its interior value, colors blend the same way, and a lighter band traces the free surface. The covered area matches the particles' area to 10% (test).
 - [x] Needs float render targets; where they're missing (some WebGL), the 3D toggle falls back to balls.
+
+**The Fluids tab** (editor `fluids/`, engine3d additions):
+- [x] A glass box (0.25–2 m, default 1 m; walls drawn as edges so the liquid shows) in **1 atm of air at 20 °C** (an air grid that takes heat off the free surface) or **vacuum** (none). Particle spacing 5–2 cm; the default 4 cm keeps a box a third full (about 5,000 particles) interactive on the CPU.
+- [x] Placing: **Block** (drag a rectangle on the floor; it stands on the liquid already there), **Ball** (dropped from a chosen height), **Fill to level**. Nothing is ever placed on top of existing liquid.
+- [x] **Solids** with real densities: cork 240, pine 500, polypropylene 900, rubber 1100, aluminum 2700, steel 7850, gold 19,300 kg/m³ (steel floats on mercury; gold sinks through it). Select and drag them; the inspector shows the liquid's force on them.
+- [x] **Heater and cooler plates** (−20 to 99 °C until boiling arrives): bodies can now hold a temperature (`RigidBody::temperature`). The thermal boundary layer at a heated wall is far thinner than a particle, so plain SPH conduction across one spacing underestimated the flux about 100×; walls and plates now use the larger of conduction and **natural convection**, h = 0.13 k (g β ΔT / ν α)^(1/3) (turbulent, McAdams; about 1.2 kW/m²·K for water against an 80 °C plate), with each liquid's properties at the film temperature.
+- [x] **Walls held at a temperature** or insulated.
+- [x] **Heat brush**: puts exactly its power (±20 kW) into the liquid within its radius, shared by mass; no particle passes its liquid's boiling point (water 100 °C, +0.5 K for seawater; mercury 357 °C; oil's 230 °C smoke point) or freezing point (seawater −1.9 °C).
+- [x] **Probe**: kernel-weighted temperature, absolute pressure (gauge + the box's atmosphere), density, speed, and kinetic energy per litre at the point under the mouse; click to pin.
+- [x] **Totals**: mass and volume per liquid; kinetic, potential, thermal (above 20 °C) energy, the heat brush's input; mean and hottest temperature. **Graph** of energies or temperatures over the run.
+- [x] Color by liquid, temperature, speed, pressure, or density. Smooth surfaces on by default, now with studio reflections (ground, sky, one soft overhead light) so ripples catch highlights.
+- [x] The GPU solver steps only isothermal fresh water; anything with heat or other liquids runs on the CPU. The landing page's menu gains a Fluids button.
+
+| Check | Result |
+|---|---|
+| Hot plate (80 °C) into 20 °C water, 0.25 s | heat in matches h·A·ΔT·t within 20% |
+| Heat brush, 1 kW for 0.5 s | adds 500 J to 10⁻³ J |
+| Probe 0.3 m deep in seawater | ρ g h within 30% (WCSPH pressure noise) |
+| Seawater limits | boils 0.6 K higher, freezes at −1.9 °C |
+| Fill to 25% | 0.20–0.26 m³ in a 1 m box |
+| Surface shaders | parse and validate (naga) in tests, so a shader error fails CI instead of crashing at startup |
+
+Known limit (Fluids tab): mercury makes the solver ~4× slower (its density forces a stiffer, faster sound speed). A GPU port of the multiphase solver, for ~100k particles at 2 cm, is the next performance step.
 
 Known limit: buoyant blobs that are resolved (several particles across) rise more slowly than real ones; a perfectly flat oil layer under water waits for a disturbance before it overturns, as it would in reality. An implicit incompressible solver (DFSPH) was tried and didn't help; it's parked.
 

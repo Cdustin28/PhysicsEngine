@@ -19,6 +19,7 @@ mod soft;
 pub(crate) use panels::title_case;
 
 use crate::camera::Camera;
+use crate::fluids::{FluidsEditor, PersistedFluids};
 use crate::history::History;
 use crate::orbits::{OrbitEditor, PersistedOrbits};
 use crate::theme::Theme;
@@ -65,6 +66,8 @@ enum Mode {
     ThreeD,
     /// Planets and moons under gravity.
     Orbits,
+    /// A box of liquids, with heat.
+    Fluids,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -225,6 +228,7 @@ struct Persisted {
     gas_settings: gas::GasSettings,
     view3d: Persisted3d,
     orbits: PersistedOrbits,
+    fluids: PersistedFluids,
     camera: Camera,
     new_body: NewBodySettings,
     fluid_shape: FluidShape,
@@ -253,6 +257,7 @@ impl Default for Persisted {
             gas_settings: gas::GasSettings::default(),
             view3d: Persisted3d::default(),
             orbits: PersistedOrbits::default(),
+            fluids: PersistedFluids::default(),
             camera: Camera::default(),
             new_body: NewBodySettings::default(),
             fluid_shape: FluidShape::Rectangle,
@@ -279,6 +284,8 @@ pub struct EditorApp {
     view3d: Editor3d,
     /// The Orbits tab.
     orbits: OrbitEditor,
+    /// The Fluids tab.
+    fluids: FluidsEditor,
     world: World,
     /// World state captured when Play was pressed, restored by Reset.
     snapshot: Option<World>,
@@ -367,6 +374,7 @@ impl EditorApp {
             app.mode = match mode.as_str() {
                 "3d" => Mode::ThreeD,
                 "orbits" => Mode::Orbits,
+                "fluids" => Mode::Fluids,
                 _ => Mode::TwoD,
             };
         }
@@ -375,6 +383,7 @@ impl EditorApp {
         let render3d = crate::view3d::render::BodyRenderer::install(cc);
         app.view3d.set_gpu_render(render3d);
         app.orbits.set_gpu_render(render3d);
+        app.fluids.set_gpu_render(render3d);
         #[cfg(not(target_arch = "wasm32"))]
         {
             app.view3d
@@ -455,6 +464,7 @@ impl EditorApp {
             theme: p.theme,
             view3d: Editor3d::new(std::mem::take(&mut p.view3d), false),
             orbits: OrbitEditor::new(std::mem::take(&mut p.orbits), false),
+            fluids: FluidsEditor::new(std::mem::take(&mut p.fluids)),
             world,
             snapshot: None,
             running: false,
@@ -507,6 +517,7 @@ impl EditorApp {
             gas_settings: self.gas_settings.clone(),
             view3d: self.view3d.persisted(),
             orbits: self.orbits.persisted(),
+            fluids: self.fluids.persisted(),
             camera: self.camera,
             new_body: self.new_body.clone(),
             fluid_shape: self.fluid_shape,
@@ -723,6 +734,7 @@ impl EditorApp {
             self.pause();
             self.view3d.pause_public();
             self.orbits.pause();
+            self.fluids.pause();
             self.mode = mode;
         }
     }
@@ -730,6 +742,10 @@ impl EditorApp {
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
         if self.mode == Mode::Orbits {
             self.orbits.handle_shortcuts(ctx);
+            return;
+        }
+        if self.mode == Mode::Fluids {
+            self.fluids.handle_shortcuts(ctx);
             return;
         }
         if self.mode == Mode::ThreeD {
@@ -831,6 +847,10 @@ impl eframe::App for EditorApp {
             self.orbits.logic(ctx);
             return;
         }
+        if self.mode == Mode::Fluids {
+            self.fluids.logic(ctx);
+            return;
+        }
         if self.running {
             // Cap the frame time so a stall (window drag, breakpoint) doesn't
             // dump seconds of backlog into the simulation.
@@ -860,6 +880,18 @@ impl eframe::App for EditorApp {
                 .show(ui, |ui| self.orbits.sidebar(ui));
             egui::CentralPanel::no_frame().show(ui, |ui| self.orbits.canvas(ui));
             if let Some(s) = self.orbits.take_status() {
+                self.status = s;
+            }
+            return;
+        }
+        if self.mode == Mode::Fluids {
+            egui::Panel::left("sidebar_fluids")
+                .resizable(true)
+                .default_size(310.0)
+                .show(ui, |ui| self.fluids.sidebar(ui));
+            egui::CentralPanel::no_frame().show(ui, |ui| self.fluids.canvas(ui));
+            self.fluids.record_finished_edit(&ctx);
+            if let Some(s) = self.fluids.take_status() {
                 self.status = s;
             }
             return;

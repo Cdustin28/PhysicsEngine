@@ -36,6 +36,10 @@ pub struct RigidBody {
     pub friction: f32,
     /// Static bodies have infinite mass and never move.
     pub is_static: bool,
+    /// A temperature this body holds its surface at, K (a heater or cooler
+    /// plate), or `None` to use the fluid's wall setting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
 
     #[serde(skip)]
     force: Vec3,
@@ -57,6 +61,7 @@ impl PartialEq for RigidBody {
             && self.restitution == other.restitution
             && self.friction == other.friction
             && self.is_static == other.is_static
+            && self.temperature == other.temperature
     }
 }
 
@@ -77,6 +82,7 @@ impl RigidBody {
             restitution: 0.3,
             friction: 0.5,
             is_static: false,
+            temperature: None,
             force: Vec3::ZERO,
             torque: Vec3::ZERO,
             handle: 0,
