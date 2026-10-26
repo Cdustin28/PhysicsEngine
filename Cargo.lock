@@ -934,6 +934,7 @@ dependencies = [
  "glam",
  "gpu",
  "js-sys",
+ "naga",
  "rfd",
  "serde",
  "serde_json",

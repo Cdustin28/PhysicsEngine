@@ -22,6 +22,8 @@ pub struct Boundary {
     pub body: Vec<u32>,
     /// Center of mass of every body, for torques.
     pub body_centers: Vec<Vec3>,
+    /// Temperature each body holds its surface at, K, if any.
+    pub body_temperatures: Vec<Option<f32>>,
     /// Akinci weight ψ (kg): the mass this particle stands in for.
     pub psi: Vec<f32>,
     pub grid: NeighborGrid,
@@ -45,6 +47,7 @@ impl Boundary {
         };
         let mut points = Vec::new();
         b.body_centers = bodies.iter().map(|body| body.position).collect();
+        b.body_temperatures = bodies.iter().map(|body| body.temperature).collect();
         for (i, body) in bodies.iter().enumerate() {
             points.clear();
             body.sample_surface(spacing, inset, region, &mut points);
@@ -72,6 +75,11 @@ impl Boundary {
             })
             .collect();
         b
+    }
+
+    /// True if any body holds a temperature.
+    pub fn has_temperatures(&self) -> bool {
+        self.body_temperatures.iter().any(Option::is_some)
     }
 
     pub fn cell_size(&self) -> f32 {

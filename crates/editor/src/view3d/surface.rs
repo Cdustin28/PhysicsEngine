@@ -287,13 +287,27 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     // Normal from the smaller of the forward/backward depth differences, so
     // silhouettes don't smear.
     let c = view_pos(p, d);
-    let dxp = view_pos(p + vec2<i32>(1, 0), textureLoad(depth_tex, p + vec2<i32>(1, 0), 0).r) - c;
-    let dxm = c - view_pos(p - vec2<i32>(1, 0), textureLoad(depth_tex, p - vec2<i32>(1, 0), 0).r);
-    let dyp = view_pos(p + vec2<i32>(0, 1), textureLoad(depth_tex, p + vec2<i32>(0, 1), 0).r) - c;
-    let dym = c - view_pos(p - vec2<i32>(0, 1), textureLoad(depth_tex, p - vec2<i32>(0, 1), 0).r);
-    let ddx = select(dxm, dxp, abs(dxp.z) < abs(dxm.z));
-    let ddy = select(dym, dyp, abs(dyp.z) < abs(dym.z));
+    // Neighbors with no liquid (depth 0) or on another surface behind or
+    // in front are skipped; with neither side usable, face the camera.
+    let same_surface = 4.0 * u.light.w;
+    let dr = textureLoad(depth_tex, p + vec2<i32>(1, 0), 0).r;
+    let dl = textureLoad(depth_tex, p - vec2<i32>(1, 0), 0).r;
+    let du = textureLoad(depth_tex, p + vec2<i32>(0, 1), 0).r;
+    let dd = textureLoad(depth_tex, p - vec2<i32>(0, 1), 0).r;
+    let ok_r = dr > 0.0 && abs(dr - d) < same_surface;
+    let ok_l = dl > 0.0 && abs(dl - d) < same_surface;
+    let ok_u = du > 0.0 && abs(du - d) < same_surface;
+    let ok_d = dd > 0.0 && abs(dd - d) < same_surface;
+    let dxp = view_pos(p + vec2<i32>(1, 0), dr) - c;
+    let dxm = c - view_pos(p - vec2<i32>(1, 0), dl);
+    let dyp = view_pos(p + vec2<i32>(0, 1), du) - c;
+    let dym = c - view_pos(p - vec2<i32>(0, 1), dd);
+    let ddx = select(select(dxm, dxp, abs(dxp.z) < abs(dxm.z)), select(dxm, dxp, ok_r), !(ok_r && ok_l));
+    let ddy = select(select(dym, dyp, abs(dyp.z) < abs(dym.z)), select(dym, dyp, ok_u), !(ok_u && ok_d));
     var n = normalize(cross(ddy, ddx));
+    if (!(ok_r || ok_l) || !(ok_u || ok_d)) {
+        n = normalize(-c);
+    }
     let v = normalize(-c);
     if (dot(n, v) < 0.0) {
         n = -n;
@@ -319,9 +333,10 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     let uv = (vec2<f32>(p) + 0.5) * u.size.zw;
     let offset = n.xy * vec2<f32>(1.0, -1.0) * 0.03 * clamp(column * 4.0, 0.0, 1.0);
     let behind = srgb_to_linear(textureSample(scene_tex, scene_sampler, clamp(uv + offset, vec2<f32>(0.0), vec2<f32>(1.0))).rgb);
-    // Beer–Lambert: each liquid absorbs what its color lacks; 10 cm of
-    // water already looks distinctly blue.
-    let absorb = (vec3<f32>(1.0) - albedo) * 10.0 + vec3<f32>(0.5);
+    // Beer–Lambert: each liquid absorbs what its color lacks (several
+    // times real water's absorption, so a tank of it reads as blue rather
+    // than invisible).
+    let absorb = (vec3<f32>(1.0) - albedo) * 4.0 + vec3<f32>(0.1);
     let transmit = exp(-absorb * column);
     // Light scattered back out of the liquid's body, lit like a matte
     // surface: what gives a deep pool its own color.
@@ -332,7 +347,14 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     // Reflection of a simple sky (horizon color to a lighter zenith).
     let r = reflect(-normalize((u.inv_view * vec4<f32>(v, 0.0)).xyz), world_n);
     let sky = srgb_to_linear(u.sky.rgb);
-    let env = mix(sky * 0.9, mix(sky, vec3<f32>(1.0), 0.35), clamp(r.y * 0.5 + 0.5, 0.0, 1.0));
+    // A simple studio: grey ground below the horizon, the sky above
+    // (paler at the horizon), and one big soft light overhead, so ripples
+    // catch highlights the way a real liquid surface does.
+    let ground = vec3<f32>(0.18);
+    let above = mix(sky * 1.05, sky * 0.8, clamp(r.y, 0.0, 1.0));
+    let horizon = smoothstep(-0.05, 0.05, r.y);
+    let softbox = smoothstep(0.93, 0.985, dot(r, normalize(vec3<f32>(0.3, 1.0, 0.25))));
+    let env = mix(ground, above, horizon) + vec3<f32>(2.5 * softbox);
     let h = normalize(l + normalize((u.inv_view * vec4<f32>(v, 0.0)).xyz));
     let spec = pow(max(dot(world_n, h), 0.0), 80.0);
     let reflection = env + vec3<f32>(spec * 1.5);
@@ -341,7 +363,7 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     let silver = vec3<f32>(0.62, 0.63, 0.66);
     let mercury = silver * (env * 0.8 + vec3<f32>(0.15)) + vec3<f32>(spec * 2.5);
     let through = mix(behind * transmit, mercury * exp(-absorb * clear_front), metal);
-    let refracted = through + albedo * body * 0.8;
+    let refracted = through + albedo * body * 0.35;
 
     let surface_color = mix(refracted, reflection, fresnel);
     return vec4<f32>(pow(surface_color, vec3<f32>(1.0 / 2.2)), 1.0);
@@ -900,15 +922,31 @@ impl SurfaceRenderer {
 
 /// One [`SurfaceParticle`] per fluid particle, colored by its liquid.
 pub fn particles(fluid: &engine3d::Fluid, radius: f32) -> Vec<SurfaceParticle> {
+    particles_colored(fluid, radius, true, |i| {
+        fluid
+            .liquid(i)
+            .color(fluid.salinity.get(i).copied().unwrap_or(0.0))
+    })
+}
+
+/// One [`SurfaceParticle`] per fluid particle in the given colors; mercury
+/// is drawn as a metal if `metal` (otherwise every liquid is see-through,
+/// so a false-color view reads everywhere).
+pub fn particles_colored(
+    fluid: &engine3d::Fluid,
+    radius: f32,
+    metal: bool,
+    color: impl Fn(usize) -> [u8; 3],
+) -> Vec<SurfaceParticle> {
     use engine3d::fluid::Liquid;
     (0..fluid.len())
         .map(|i| {
-            let liquid = fluid.liquid(i);
-            let [r, g, b] = liquid.color(fluid.salinity.get(i).copied().unwrap_or(0.0));
+            let [r, g, b] = color(i);
+            let is_metal = metal && fluid.liquid(i) == Liquid::Mercury;
             SurfaceParticle {
                 position: fluid.positions[i].to_array(),
                 radius,
-                color: [r, g, b, if liquid == Liquid::Mercury { 255 } else { 0 }],
+                color: [r, g, b, if is_metal { 255 } else { 0 }],
             }
         })
         .collect()
@@ -931,5 +969,24 @@ mod tests {
     fn layouts_match_shaders() {
         assert_eq!(std::mem::size_of::<SurfaceParticle>(), 20);
         assert_eq!(std::mem::size_of::<Uniforms>(), 4 * 64 + 4 * 16);
+    }
+
+    #[test]
+    fn shaders_compile() {
+        for (name, body) in [
+            ("splat", SPLAT_SHADER),
+            ("blur", BLUR_SHADER),
+            ("composite", COMPOSITE_SHADER),
+        ] {
+            let source = format!("{COMMON}{body}");
+            let module = naga::front::wgsl::parse_str(&source)
+                .unwrap_or_else(|e| panic!("{name}: {}", e.emit_to_string(&source)));
+            naga::valid::Validator::new(
+                naga::valid::ValidationFlags::all(),
+                naga::valid::Capabilities::default(),
+            )
+            .validate(&module)
+            .unwrap_or_else(|e| panic!("{name}: {e:?}"));
+        }
     }
 }

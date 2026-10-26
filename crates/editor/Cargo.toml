@@ -49,3 +49,8 @@ web-sys = { version = "0.3", features = [
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+# Parse and validate the WGSL shaders in tests (a shader error otherwise
+# shows up only as a crash at startup).
+naga = { version = "30", features = ["wgsl-in"] }

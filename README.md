@@ -4,7 +4,7 @@ A rigid-body and particle-fluid physics engine with an interactive editor, writt
 
 Website: [physicsengine.dev](https://physicsengine.dev) · Simulator in your browser: [physicsengine.dev/sim](https://physicsengine.dev/sim/) · Validation: [physicsengine.dev/validation](https://physicsengine.dev/validation/) · Plan: [ROADMAP.md](ROADMAP.md)
 
-> **Status:** milestone M11. In 2D and 3D, rigid bodies (boxes and circles or spheres) collide, stack, bounce, roll, and slide with friction, and can be joined by pins, rods, ropes, springs, and chains; soft blobs, jelly, and cloth deform and push them around; smoke and hot air rise around them; SPH liquids (water, salt water, oil, and mercury, which sort themselves by density) flow around them, and bodies float, sink, and get pushed by them, on the CPU (fresh water also on the desktop GPU). The editor switches between 2D, 3D, and an Orbits tab (a star, planets, and moons under N-body gravity in real units, starting from the Solar System), has undo and a dark mode, and runs in the browser. A [validation page](https://physicsengine.dev/validation/) runs both engines against exact physics on every deploy.
+> **Status:** milestone M12. In 2D and 3D, rigid bodies (boxes and circles or spheres) collide, stack, bounce, roll, and slide with friction, and can be joined by pins, rods, ropes, springs, and chains; soft blobs, jelly, and cloth deform and push them around; smoke and hot air rise around them; SPH liquids (water, salt water, oil, and mercury, which sort themselves by density) flow around them, and bodies float, sink, and get pushed by them, on the CPU (fresh water also on the desktop GPU). The editor switches between 2D, 3D, an Orbits tab (a star, planets, and moons under N-body gravity in real units, starting from the Solar System), and a Fluids tab (a glass box in air or vacuum to pour liquids into, drop solids in, and heat with plates or a brush, with probes, totals, and graphs; liquids drawn as smooth surfaces), has undo and a dark mode, and runs in the browser. A [validation page](https://physicsengine.dev/validation/) runs both engines against exact physics on every deploy.
 
 ## Running it
 
@@ -107,7 +107,7 @@ crates/
   validation/ runs the engines against exact results and writes physicsengine.dev/validation
             (cargo run --release -p validation [-- OUTPUT_DIR]; exits non-zero if a check fails)
   editor/   eframe/egui app: canvas, tools, inspector, GPU particle renderer, and the 3D view
-            (src/view3d: orbit camera, instanced mesh renderer; src/orbits: the Orbits tab;
+            (src/view3d: orbit camera, instanced mesh renderer; src/orbits: the Orbits tab; src/fluids: the Fluids tab;
             src/theme.rs: light and dark themes). Builds native and wasm.
 scenes/     example scene files
 index.html  physicsengine.dev landing page

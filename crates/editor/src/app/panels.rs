@@ -12,12 +12,14 @@ impl EditorApp {
             ui.selectable_value(&mut mode, Mode::TwoD, "2D");
             ui.selectable_value(&mut mode, Mode::ThreeD, "3D");
             ui.selectable_value(&mut mode, Mode::Orbits, "Orbits");
+            ui.selectable_value(&mut mode, Mode::Fluids, "Fluids");
             self.set_mode(mode);
             ui.separator();
             match self.mode {
                 Mode::ThreeD => self.view3d.toolbar(ui),
                 Mode::TwoD => self.toolbar_2d(ui),
                 Mode::Orbits => self.orbits.toolbar(ui),
+                Mode::Fluids => self.fluids.toolbar(ui),
             }
             self.file_buttons(ui);
         });
@@ -112,9 +114,9 @@ impl EditorApp {
     /// Open, Save, Copy, Paste: shared by both editors.
     fn file_buttons(&mut self, ui: &mut Ui) {
         ui.separator();
-        // Scene files are 2D/3D scenes; the Orbits tab saves its system
-        // between sessions instead.
-        if self.mode != Mode::Orbits {
+        // Scene files are 2D/3D scenes; the Orbits and Fluids tabs keep
+        // their state between sessions instead.
+        if !matches!(self.mode, Mode::Orbits | Mode::Fluids) {
             if ui
                 .button("Open…")
                 .on_hover_text("Open a scene file")
@@ -610,6 +612,14 @@ impl EditorApp {
     }
 
     pub(super) fn status_bar(&mut self, ui: &mut Ui) {
+        if self.mode == Mode::Fluids {
+            ui.horizontal(|ui| {
+                self.fluids.status_bar(ui);
+                ui.separator();
+                ui.weak(&self.status);
+            });
+            return;
+        }
         if self.mode == Mode::Orbits {
             ui.horizontal(|ui| {
                 self.orbits.status_bar(ui);

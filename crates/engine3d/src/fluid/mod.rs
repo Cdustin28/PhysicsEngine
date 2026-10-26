@@ -110,6 +110,10 @@ pub const BOUNDARY_INSET_FACTOR: f32 = 0.55;
 const BOUNDARY_GAP_FACTOR: f32 = 0.9;
 /// The same minimum, measured from the body's real surface.
 const SURFACE_GAP_FACTOR: f32 = BOUNDARY_GAP_FACTOR - BOUNDARY_INSET_FACTOR;
+/// Converts a wall heat transfer coefficient h into the conductivity the
+/// SPH wall-conduction sum needs to carry the flux h·ΔT: k = h·Δx × this
+/// (measured on a lattice against a flat plate; see tests/heat3d.rs).
+const WALL_FILM: f32 = 0.65;
 /// Fluid particles that fall below this height are deleted.
 pub const KILL_DEPTH: f32 = -50.0;
 
@@ -439,6 +443,21 @@ impl PartialEq for Fluid {
                     && temp(self, i) == temp(other, i)
             })
     }
+}
+
+/// What [`Fluid::probe`] finds at a point.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Probe {
+    /// K.
+    pub temperature: f32,
+    /// m/s.
+    pub velocity: Vec3,
+    /// kg/m³.
+    pub density: f32,
+    /// Gauge pressure (above the surroundings), Pa.
+    pub pressure: f32,
+    /// The liquid most of the weight comes from.
+    pub liquid: Liquid,
 }
 
 impl Fluid {
@@ -1074,6 +1093,7 @@ impl Fluid {
         let kernel = params.kernel();
         let h = params.support();
         let h2 = h * h;
+        let spacing = params.particle_spacing;
         let m_ref = params.particle_mass();
         let rho_ref = params.rest_density;
         // Every particle's volume at rest, and the reference liquid's
@@ -1109,7 +1129,8 @@ impl Fluid {
         // Conduction only matters once temperatures differ (or a wall holds
         // a temperature).
         let wall_t = params.wall_temperature;
-        let use_heat = wall_t.is_some() || {
+        let held = wall_t.is_some() || boundary.has_temperatures();
+        let use_heat = held || {
             let (lo, hi) = self
                 .temperatures
                 .iter()
@@ -1280,16 +1301,35 @@ impl Fluid {
                             * v_ib;
                     }
                 }
-                if let (true, Some(tw)) = (use_heat, wall_t) {
-                    // Walls held at `tw`, conducting like this liquid.
+                if use_heat && held {
+                    // Walls and plates held at a temperature, conducting
+                    // like this liquid.
                     for &b in &boundary_neighbors[i] {
                         let b = b as usize;
+                        let held = boundary
+                            .body_temperatures
+                            .get(boundary.body[b] as usize)
+                            .copied()
+                            .flatten()
+                            .or(wall_t);
+                        let Some(tw) = held else {
+                            continue;
+                        };
                         let r = pi.x - boundary.positions[b];
                         let dist = r.length();
                         let w = boundary.psi[b] / m_ref;
                         let rg = r.dot(kernel.grad(r, dist));
                         let diff = (pi.temperature - f64::from(tw)) as f32;
-                        heat += 2.0 * pi.k * w * v0 * diff * rg / (dist * dist + eps);
+                        // The thermal boundary layer at a heated wall is far
+                        // thinner than a particle, so conduction across one
+                        // spacing badly underestimates the flux. Use
+                        // whichever is larger: conduction, or the natural
+                        // convection coefficient h as a conductivity h·Δx.
+                        let liquid = Liquid::ALL[pi.liquid as usize];
+                        let h_conv =
+                            liquid.natural_convection(pi.salinity, pi.temperature as f32, tw);
+                        let k_wall = pi.k.max(h_conv * spacing * WALL_FILM);
+                        heat += 2.0 * k_wall * w * v0 * diff * rg / (dist * dist + eps);
                     }
                 }
                 *acc = a;
@@ -1420,6 +1460,99 @@ impl Fluid {
     }
 
     /// Total mass of each liquid, kg, indexed by [`Liquid::index`].
+    /// True if the GPU solver can step this fluid: fresh water, all at one
+    /// temperature, with no wall temperature (its shaders don't carry
+    /// heat or more than one liquid yet).
+    pub fn gpu_can_step(&self) -> bool {
+        self.is_fresh_water()
+            && self.params.wall_temperature.is_none()
+            && self.temperatures.windows(2).all(|w| w[0] == w[1])
+    }
+
+    /// Put `power` watts into the liquid within `radius` of `center` for
+    /// `dt` seconds (negative to cool), shared by mass so every particle
+    /// warms at the same rate for its specific heat. No particle goes past
+    /// its liquid's [`Liquid::max_temperature`] (boiling comes later) or
+    /// below its [`Liquid::min_temperature`] (no freezing yet); one at a
+    /// limit takes no more. Returns the energy actually added, J.
+    pub fn add_heat(&mut self, center: Vec3, radius: f32, power: f32, dt: f32) -> f64 {
+        let r2 = radius * radius;
+        let inside: Vec<usize> = (0..self.len())
+            .filter(|&i| (self.positions[i] - center).length_squared() <= r2)
+            .collect();
+        let total_mass: f64 = inside.iter().map(|&i| f64::from(self.mass(i))).sum();
+        if total_mass <= 0.0 {
+            return 0.0;
+        }
+        self.fill_missing_velocities();
+        let energy = f64::from(power) * f64::from(dt);
+        let mut added = 0.0;
+        for i in inside {
+            let s = self.salinity[i];
+            let liquid = self.liquid(i);
+            let cp = f64::from(liquid.specific_heat(s));
+            let m = f64::from(self.mass(i));
+            let hot = f64::from(liquid.max_temperature(s)) - 0.01;
+            let cold = f64::from(liquid.min_temperature(s)) + 0.01;
+            let t0 = self.temperatures[i];
+            let t = (t0 + energy / (total_mass * cp)).clamp(cold.min(t0), hot.max(t0));
+            self.temperatures[i] = t;
+            added += m * cp * (t - t0);
+        }
+        added
+    }
+
+    /// The liquid at `point`: kernel-weighted averages over the particles
+    /// within the kernel support, or `None` if there are none.
+    pub fn probe(&self, point: Vec3) -> Option<Probe> {
+        let kernel = self.params.kernel();
+        let h = self.params.support();
+        let mut weight = 0.0f64;
+        let mut temperature = 0.0f64;
+        let mut velocity = Vec3::ZERO;
+        let mut density = 0.0f32;
+        let mut pressure = 0.0f32;
+        let mut by_liquid = [0.0f32; 3];
+        let densities = self.densities();
+        let pressures = self.pressures();
+        for i in 0..self.len() {
+            let d = (self.positions[i] - point).length();
+            if d >= h {
+                continue;
+            }
+            let w = kernel.w(d);
+            weight += f64::from(w);
+            temperature += f64::from(w)
+                * self
+                    .temperatures
+                    .get(i)
+                    .copied()
+                    .unwrap_or(f64::from(ROOM_TEMPERATURE));
+            velocity += w * self.velocities.get(i).copied().unwrap_or(Vec3::ZERO);
+            density += w * densities
+                .get(i)
+                .copied()
+                .unwrap_or(self.liquid(i).density(0.0));
+            pressure += w * pressures.get(i).copied().unwrap_or(0.0);
+            by_liquid[self.liquid(i).index()] += w;
+        }
+        if weight <= 0.0 {
+            return None;
+        }
+        let wf = weight as f32;
+        let liquid = Liquid::ALL
+            .into_iter()
+            .max_by(|a, b| by_liquid[a.index()].total_cmp(&by_liquid[b.index()]))
+            .unwrap_or_default();
+        Some(Probe {
+            temperature: (temperature / weight) as f32,
+            velocity: velocity / wf,
+            density: density / wf,
+            pressure: pressure / wf,
+            liquid,
+        })
+    }
+
     pub fn mass_by_liquid(&self) -> [f32; 3] {
         let mut out = [0.0; 3];
         for i in 0..self.len() {

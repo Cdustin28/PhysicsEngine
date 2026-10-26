@@ -33,7 +33,7 @@
     }
     .menu {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 220px));
+      grid-template-columns: repeat(4, minmax(0, 200px));
       gap: 16px;
       justify-content: center;
       margin-top: 36px;
@@ -84,6 +84,9 @@
     .btn:hover {
       background-color: rgba(0, 216, 255, 0.12);
     }
+    @media (max-width: 900px) {
+      .menu { grid-template-columns: repeat(2, minmax(0, 220px)); }
+    }
     @media (max-width: 720px) {
       h1 { font-size: 2.2em; }
       .menu { grid-template-columns: minmax(0, 320px); }
@@ -106,6 +109,10 @@
       <a class="mode" href="sim/?mode=orbits">
         <strong>Orbits</strong>
         <span>Planets and moons under real gravity, starting from the Solar System</span>
+      </a>
+      <a class="mode" href="sim/?mode=fluids">
+        <strong>Fluids</strong>
+        <span>Water, salt water, oil, and mercury in a box, with heat</span>
       </a>
     </nav>
     <div class="links">

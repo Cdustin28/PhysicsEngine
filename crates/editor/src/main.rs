@@ -3,6 +3,7 @@
 
 mod app;
 mod camera;
+mod fluids;
 mod history;
 mod liquid_ui;
 mod orbits;
