@@ -53,7 +53,7 @@ impl Boundary {
             b.body.extend(std::iter::repeat_n(i as u32, points.len()));
             b.positions.extend_from_slice(&points);
         }
-        b.grid.rebuild(&b.positions, b.cell);
+        b.grid.rebuild_fine(&b.positions, b.cell);
         let h2 = kernel.support() * kernel.support();
         #[cfg(feature = "parallel")]
         let points = b.positions.par_iter();
@@ -62,8 +62,8 @@ impl Boundary {
         b.psi = points
             .map(|&x| {
                 let mut sum = 0.0;
-                b.grid.for_each_candidate(x, |k| {
-                    let d2 = (x - b.positions[k]).length_squared();
+                b.grid.for_each_near(x, |_, xk| {
+                    let d2 = (x - xk).length_squared();
                     if d2 < h2 {
                         sum += kernel.w(d2.sqrt());
                     }

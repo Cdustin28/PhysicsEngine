@@ -4,6 +4,9 @@
 //! cargo run --release -p engine --example bench_fluid
 //! cargo run --release -p engine --example bench_fluid --features parallel
 //! ```
+//!
+//! `WARM` and `STEPS` (environment variables) change the warm-up and timed
+//! step counts, e.g. for a short run under a profiler.
 
 use engine::{Vec2, presets};
 use std::time::Instant;
@@ -19,10 +22,17 @@ fn main() {
     let dt = 1.0 / 120.0;
 
     // Warm up through the initial collapse, then time 1 s of simulation.
-    for _ in 0..30 {
+    for _ in 0..std::env::var("WARM")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(30)
+    {
         world.step(dt);
     }
-    let steps = 120;
+    let steps = std::env::var("STEPS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(120);
     let mut substeps = 0;
     let start = Instant::now();
     for _ in 0..steps {

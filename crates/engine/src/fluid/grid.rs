@@ -20,10 +20,11 @@
 
 use glam::Vec2;
 
+/// A point as stored in the grid: a copy of its position, so queries read
+/// one contiguous array instead of looking each candidate up elsewhere.
 #[derive(Debug, Clone, Copy, Default)]
 struct Entry {
-    cx: i32,
-    cy: i32,
+    p: Vec2,
     index: u32,
 }
 
@@ -39,6 +40,10 @@ enum Layout {
 #[derive(Debug, Clone, Default)]
 pub struct NeighborGrid {
     inv_cell: f32,
+    /// Cells searched on each side of a query's own cell: 1 for cells the
+    /// size of the search radius, 2 for half that (see
+    /// [`NeighborGrid::rebuild_fine`]).
+    reach: i32,
     layout: Layout,
     mask: usize,
     /// `starts[s]..starts[s + 1]` is slot `s`'s range in `entries`.
@@ -49,6 +54,16 @@ pub struct NeighborGrid {
 
 /// Use the dense layout when it needs at most this many cells per point.
 const MAX_DENSE_CELLS_PER_POINT: usize = 4;
+
+/// ⌊x⌋ as an integer, saturating for huge values (so a far-flung particle
+/// shares an edge cell instead of breaking the grid). Written out because
+/// `f32::floor` is a library call on baseline x86-64, and this is on the
+/// hottest path.
+#[inline]
+fn floor_i32(x: f32) -> i32 {
+    let i = x as i32;
+    if (i as f32) > x { i - 1 } else { i }
+}
 
 fn hash(cx: i32, cy: i32, mask: usize) -> usize {
     // Large primes from Teschner et al., "Optimized Spatial Hashing" (2003).
@@ -66,7 +81,21 @@ impl NeighborGrid {
 
     /// Rebuild in place, reusing allocations.
     pub fn rebuild(&mut self, points: &[Vec2], cell: f32) {
+        self.rebuild_with_reach(points, cell, 1);
+    }
+
+    /// Rebuild with cells half the search `radius` across, searching the
+    /// 5×5 block around a query instead of 3×3. The block covers 25
+    /// (r/2)² = 6.25 r² instead of 9 r², so queries check about 30% fewer
+    /// candidates; worth it when queries dominate (the fluid's neighbor
+    /// search).
+    pub fn rebuild_fine(&mut self, points: &[Vec2], radius: f32) {
+        self.rebuild_with_reach(points, 0.5 * radius, 2);
+    }
+
+    fn rebuild_with_reach(&mut self, points: &[Vec2], cell: f32, reach: i32) {
         self.inv_cell = 1.0 / cell;
+        self.reach = reach;
         let mut cells = std::mem::take(&mut self.cells);
         cells.clear();
         cells.extend(points.iter().map(|&p| self.cell_of(p)));
@@ -83,7 +112,8 @@ impl NeighborGrid {
         );
         let dense_cells = nx.saturating_mul(ny);
         let slots = if !cells.is_empty()
-            && dense_cells <= (points.len() * MAX_DENSE_CELLS_PER_POINT + 64) as i64
+            && dense_cells
+                <= (points.len() * MAX_DENSE_CELLS_PER_POINT * (reach * reach) as usize + 64) as i64
         {
             self.layout = Layout::Dense {
                 x0: lo.0,
@@ -119,8 +149,7 @@ impl NeighborGrid {
                 .slot(cx, cy)
                 .expect("every point's cell is in the grid");
             self.entries[next[s] as usize] = Entry {
-                cx,
-                cy,
+                p: points[i],
                 index: i as u32,
             };
             next[s] += 1;
@@ -142,30 +171,38 @@ impl NeighborGrid {
     }
 
     fn cell_of(&self, p: Vec2) -> (i32, i32) {
-        // `as i32` saturates for huge values, so far-flung particles just
-        // share an edge cell instead of breaking the grid.
         (
-            (p.x * self.inv_cell).floor() as i32,
-            (p.y * self.inv_cell).floor() as i32,
+            floor_i32(p.x * self.inv_cell),
+            floor_i32(p.y * self.inv_cell),
         )
     }
 
-    /// Call `f(index)` for every point in the 3×3 block of cells around `p`.
-    /// That is a superset of the points within one cell size of `p`; callers
-    /// do the exact distance check.
+    /// Call `f(index)` for every point in the block of cells around `p`
+    /// (3×3, or 5×5 after [`Self::rebuild_fine`]). That is a superset of the
+    /// points within the search radius of `p`; callers do the exact
+    /// distance check.
     pub fn for_each_candidate(&self, p: Vec2, mut f: impl FnMut(usize)) {
+        self.for_each_near(p, |j, _| f(j));
+    }
+
+    /// Like [`Self::for_each_candidate`], also passing each candidate's
+    /// position (from the grid's own copy, which is faster to read).
+    pub fn for_each_near(&self, p: Vec2, mut f: impl FnMut(usize, Vec2)) {
         if self.entries.is_empty() {
             return;
         }
         let (cx, cy) = self.cell_of(p);
+        let reach = self.reach.max(1);
         if let Layout::Dense { x0, y0, nx, ny } = self.layout {
-            // Three rows; in each, cells cx−1..=cx+1 are adjacent slots.
-            let x_lo = (i64::from(cx) - 1 - i64::from(x0)).max(0);
-            let x_hi = (i64::from(cx) + 1 - i64::from(x0)).min(i64::from(nx) - 1);
+            // A few rows; in each, cells cx−reach..=cx+reach are adjacent
+            // slots.
+            let r = i64::from(reach);
+            let x_lo = (i64::from(cx) - r - i64::from(x0)).max(0);
+            let x_hi = (i64::from(cx) + r - i64::from(x0)).min(i64::from(nx) - 1);
             if x_lo > x_hi {
                 return;
             }
-            for dy in -1..=1_i64 {
+            for dy in -r..=r {
                 let y = i64::from(cy) + dy - i64::from(y0);
                 if y < 0 || y >= i64::from(ny) {
                     continue;
@@ -174,20 +211,20 @@ impl NeighborGrid {
                 let range = self.starts[(row + x_lo) as usize] as usize
                     ..self.starts[(row + x_hi + 1) as usize] as usize;
                 for e in &self.entries[range] {
-                    f(e.index as usize);
+                    f(e.index as usize, e.p);
                 }
             }
             return;
         }
-        for dy in -1..=1 {
-            for dx in -1..=1 {
+        for dy in -reach..=reach {
+            for dx in -reach..=reach {
                 let (x, y) = (cx.saturating_add(dx), cy.saturating_add(dy));
                 let b = hash(x, y, self.mask);
                 let range = self.starts[b] as usize..self.starts[b + 1] as usize;
                 for e in &self.entries[range] {
                     // Different cells can share a bucket; only take this one.
-                    if e.cx == x && e.cy == y {
-                        f(e.index as usize);
+                    if self.cell_of(e.p) == (x, y) {
+                        f(e.index as usize, e.p);
                     }
                 }
             }
@@ -229,6 +266,38 @@ mod tests {
                 .filter(|&j| j != i && (points[j] - p).length_squared() < radius * radius)
                 .collect();
             assert_eq!(found, expected, "particle {i}");
+        }
+    }
+
+    #[test]
+    fn fine_grid_matches_brute_force() {
+        let mut rng = Rng(0x1234_5678);
+        let mut points: Vec<Vec2> = (0..2000)
+            .map(|_| Vec2::new(rng.next() * 6.0 - 3.0, rng.next() * 4.0 - 1.0))
+            .collect();
+        let radius = 0.13;
+        for outlier in [false, true] {
+            if outlier {
+                // One far-flung point forces the hashed layout.
+                points.push(Vec2::new(900.0, -900.0));
+            }
+            let mut grid = NeighborGrid::default();
+            grid.rebuild_fine(&points, radius);
+            assert_eq!(grid.layout == Layout::Hashed, outlier);
+            for (i, &p) in points.iter().enumerate().step_by(7) {
+                let mut found = Vec::new();
+                grid.for_each_near(p, |j, pj| {
+                    assert_eq!(pj, points[j]);
+                    if j != i && (pj - p).length_squared() < radius * radius {
+                        found.push(j);
+                    }
+                });
+                found.sort_unstable();
+                let expected: Vec<usize> = (0..points.len())
+                    .filter(|&j| j != i && (points[j] - p).length_squared() < radius * radius)
+                    .collect();
+                assert_eq!(found, expected, "particle {i}");
+            }
         }
     }
 

@@ -58,6 +58,18 @@ macro_rules! iter_mut {
     }};
 }
 
+/// Largest value from a (parallel or sequential) iterator of non-negative
+/// numbers; 0 if empty.
+#[cfg(feature = "parallel")]
+fn max_reduce(it: impl ParallelIterator<Item = f32>) -> f32 {
+    it.reduce(|| 0.0, f32::max)
+}
+
+#[cfg(not(feature = "parallel"))]
+fn max_reduce(it: impl Iterator<Item = f32>) -> f32 {
+    it.fold(0.0, f32::max)
+}
+
 macro_rules! iter {
     ($e:expr) => {{
         #[cfg(feature = "parallel")]
@@ -269,11 +281,24 @@ pub struct FluidStats {
     pub mean_compression: f32,
 }
 
+/// One particle's state for the force pass.
+#[derive(Debug, Clone, Copy, Default)]
+struct Packed {
+    x: Vec2,
+    v: Vec2,
+    rho: f32,
+    /// p / ρ², the factor the pressure force uses.
+    term: f32,
+}
+
 /// Scratch arrays reused across substeps.
 #[derive(Debug, Default)]
 struct Scratch {
     densities: Vec<f32>,
     pressures: Vec<f32>,
+    /// What the force pass reads about each neighbor, side by side so one
+    /// lookup fetches it all.
+    packed: Vec<Packed>,
     accelerations: Vec<Vec2>,
     fluid_neighbors: Vec<Vec<u32>>,
     boundary_neighbors: Vec<Vec<u32>>,
@@ -375,23 +400,9 @@ impl Fluid {
         pressures: Vec<f32>,
         substeps: u32,
     ) {
-        let rho0 = self.params.rest_density;
-        let (mut max_c, mut sum_c, mut count) = (0.0_f32, 0.0_f32, 0_u32);
-        for &rho in &densities {
-            let compression = rho / rho0 - 1.0;
-            if compression > 0.0 {
-                max_c = max_c.max(compression);
-                sum_c += compression;
-                count += 1;
-            }
-        }
-        self.stats = FluidStats {
-            substeps,
-            max_compression: max_c,
-            mean_compression: if count > 0 { sum_c / count as f32 } else { 0.0 },
-        };
         self.scratch.densities = densities;
         self.scratch.pressures = pressures;
+        self.update_stats(substeps);
     }
 
     pub fn validate(&self) -> Result<(), String> {
@@ -541,22 +552,36 @@ impl Fluid {
 
         let mut elapsed = 0.0;
         let mut substeps = 0;
+        let mut v_max = max_reduce(iter!(self.velocities).map(|v| v.length_squared())).sqrt();
         // The 1e-6 guard stops a sliver of round-off from costing a whole
         // extra substep.
         while dt - elapsed > 1e-6 {
-            let v_max = self
-                .velocities
-                .iter()
-                .map(|v| v.length_squared())
-                .fold(0.0_f32, f32::max)
-                .sqrt();
             let h = (CFL * d / (c + v_max)).min(dt - elapsed);
-            self.substep(boundary, gravity, h, max_speed, &mut impulses);
+            v_max = self.substep(boundary, gravity, h, max_speed, &mut impulses);
             elapsed += h;
             substeps += 1;
         }
-        self.stats.substeps = substeps;
+        self.update_stats(substeps);
         impulses
+    }
+
+    /// Compression statistics from the last substep's densities.
+    fn update_stats(&mut self, substeps: u32) {
+        let rho0 = self.params.rest_density;
+        let (mut max_c, mut sum_c, mut count) = (0.0_f32, 0.0_f32, 0_u32);
+        for &rho in &self.scratch.densities {
+            let compression = rho / rho0 - 1.0;
+            if compression > 0.0 {
+                max_c = max_c.max(compression);
+                sum_c += compression;
+                count += 1;
+            }
+        }
+        self.stats = FluidStats {
+            substeps,
+            max_compression: max_c,
+            mean_compression: if count > 0 { sum_c / count as f32 } else { 0.0 },
+        };
     }
 
     /// Reorder particles so that ones close together in space are close
@@ -573,6 +598,11 @@ impl Fluid {
         self.velocities = order.iter().map(|&i| self.velocities[i as usize]).collect();
     }
 
+    /// One substep. Three parallel passes over the particles, so threads
+    /// split up and rejoin as few times as possible: (1) neighbors, density,
+    /// and pressure together; (2) accelerations; (3) integration, which also
+    /// finds the fastest particle for the next substep's size. Returns that
+    /// speed.
     fn substep(
         &mut self,
         boundary: &Boundary,
@@ -580,7 +610,7 @@ impl Fluid {
         dt: f32,
         max_speed: f32,
         impulses: &mut [BodyImpulse],
-    ) {
+    ) -> f32 {
         let params = self.params;
         let kernel = params.kernel();
         let h = params.support();
@@ -597,6 +627,7 @@ impl Fluid {
         let Scratch {
             densities,
             pressures,
+            packed,
             accelerations,
             fluid_neighbors,
             boundary_neighbors,
@@ -605,80 +636,77 @@ impl Fluid {
         let positions = &self.positions;
         let velocities = &self.velocities;
 
-        // --- 1. Neighbors within the kernel support.
-        grid.rebuild(positions, h);
+        // --- 1. Neighbors within the kernel support, density (the particle
+        // itself counts too), and pressure from the Tait equation, clamped at
+        // zero. All per particle, so one pass.
+        grid.rebuild_fine(positions, h);
         let grid = &*grid;
         fluid_neighbors.resize_with(n, Vec::new);
         boundary_neighbors.resize_with(n, Vec::new);
+        densities.resize(n, 0.0);
+        pressures.resize(n, 0.0);
+        packed.resize(n, Packed::default());
+        let self_weight = mass * kernel.w(0.0);
         iter_mut!(fluid_neighbors)
+            .zip(iter_mut!(boundary_neighbors))
+            .zip(iter_mut!(densities))
+            .zip(iter_mut!(pressures))
+            .zip(iter_mut!(packed))
             .enumerate()
-            .for_each(|(i, list)| {
-                list.clear();
+            .for_each(|(i, ((((fluid, walls), rho), p), packed))| {
+                fluid.clear();
+                walls.clear();
                 let xi = positions[i];
-                grid.for_each_candidate(xi, |j| {
-                    if j != i && (xi - positions[j]).length_squared() < h2 {
-                        list.push(j as u32);
+                let mut sum = self_weight;
+                grid.for_each_near(xi, |j, xj| {
+                    let r2 = (xi - xj).length_squared();
+                    if r2 < h2 && j != i {
+                        fluid.push(j as u32);
+                        sum += mass * kernel.w(r2.sqrt());
                     }
                 });
-            });
-        iter_mut!(boundary_neighbors)
-            .enumerate()
-            .for_each(|(i, list)| {
-                list.clear();
-                let xi = positions[i];
-                boundary.grid.for_each_candidate(xi, |b| {
-                    if (xi - boundary.positions[b]).length_squared() < h2 {
-                        list.push(b as u32);
+                boundary.grid.for_each_near(xi, |b, xb| {
+                    let r2 = (xi - xb).length_squared();
+                    if r2 < h2 {
+                        walls.push(b as u32);
+                        sum += boundary.psi[b] * kernel.w(r2.sqrt());
                     }
                 });
+                *rho = sum;
+                *p = (stiffness * ((sum / rho0).powi(TAIT_GAMMA) - 1.0)).max(0.0);
+                *packed = Packed {
+                    x: xi,
+                    v: velocities[i],
+                    rho: sum,
+                    term: *p / (sum * sum),
+                };
             });
         let fluid_neighbors = &*fluid_neighbors;
         let boundary_neighbors = &*boundary_neighbors;
+        let packed = &*packed;
 
-        // --- 2. Density (the particle itself counts too).
-        densities.resize(n, 0.0);
-        let self_weight = mass * kernel.w(0.0);
-        iter_mut!(densities).enumerate().for_each(|(i, rho)| {
-            let xi = positions[i];
-            let mut sum = self_weight;
-            for &j in &fluid_neighbors[i] {
-                sum += mass * kernel.w((xi - positions[j as usize]).length());
-            }
-            for &b in &boundary_neighbors[i] {
-                let b = b as usize;
-                sum += boundary.psi[b] * kernel.w((xi - boundary.positions[b]).length());
-            }
-            *rho = sum;
-        });
-        let densities = &*densities;
-
-        // --- 3. Pressure (Tait), clamped at zero.
-        pressures.resize(n, 0.0);
-        iter_mut!(pressures).enumerate().for_each(|(i, p)| {
-            *p = (stiffness * ((densities[i] / rho0).powi(TAIT_GAMMA) - 1.0)).max(0.0);
-        });
-        let pressures = &*pressures;
-
-        // --- 4. Accelerations.
+        // --- 2. Accelerations.
         accelerations.resize(n, Vec2::ZERO);
         iter_mut!(accelerations).enumerate().for_each(|(i, acc)| {
-            let (xi, vi) = (positions[i], velocities[i]);
-            let (rho_i, p_i) = (densities[i], pressures[i]);
-            let pi_term = p_i / (rho_i * rho_i);
+            let Packed {
+                x: xi,
+                v: vi,
+                rho: rho_i,
+                term: pi_term,
+            } = packed[i];
             let mut a = gravity;
 
             for &j in &fluid_neighbors[i] {
-                let j = j as usize;
-                let r = xi - positions[j];
+                let pj = packed[j as usize];
+                let r = xi - pj.x;
                 let dist = r.length();
                 let grad = kernel.grad(r, dist);
-                let pj_term = pressures[j] / (densities[j] * densities[j]);
                 // Symmetric pressure force: conserves momentum exactly.
-                a -= mass * (pi_term + pj_term) * grad;
+                a -= mass * (pi_term + pj.term) * grad;
                 // Monaghan artificial viscosity, only while approaching.
-                let vr = (vi - velocities[j]).dot(r);
+                let vr = (vi - pj.v).dot(r);
                 if vr < 0.0 {
-                    let nu = 2.0 * params.viscosity * h_visc * c / (rho_i + densities[j]);
+                    let nu = 2.0 * params.viscosity * h_visc * c / (rho_i + pj.rho);
                     let pi_visc = -nu * vr / (dist * dist + eps);
                     a -= mass * pi_visc * grad;
                 }
@@ -702,58 +730,55 @@ impl Fluid {
             *acc = a;
         });
 
-        // --- 4b. Reaction on bodies: for every fluid-boundary pair, the
+        // --- 2b. Reaction on bodies: for every fluid-boundary pair, the
         // body gets exactly the opposite of the force the fluid particle got
         // from it above. Only particles near a body have boundary neighbors,
         // so this sequential pass is cheap.
-        for (i, list) in boundary_neighbors.iter().enumerate() {
-            if list.is_empty() {
-                continue;
-            }
-            let (xi, vi, rho_i) = (positions[i], velocities[i], densities[i]);
-            let pi_term = pressures[i] / (rho_i * rho_i);
-            for &b in list {
-                let b = b as usize;
-                let xb = boundary.positions[b];
-                let r = xi - xb;
-                let dist = r.length();
-                let mut coefficient = pi_term;
-                let vr = (vi - boundary.velocities[b]).dot(r);
-                if vr < 0.0 {
-                    let nu = params.wall_viscosity * h_visc * c / rho_i;
-                    coefficient += -nu * vr / (dist * dist + eps);
+        if !boundary.positions.is_empty() {
+            for (i, list) in boundary_neighbors.iter().enumerate() {
+                if list.is_empty() {
+                    continue;
                 }
-                let force = mass * boundary.psi[b] * coefficient * kernel.grad(r, dist);
-                let body = boundary.body[b] as usize;
-                if let Some(impulse) = impulses.get_mut(body) {
-                    impulse.linear += force * dt;
-                    impulse.angular += (xb - boundary.body_centers[body]).perp_dot(force) * dt;
+                let Packed {
+                    x: xi,
+                    v: vi,
+                    rho: rho_i,
+                    term: pi_term,
+                } = packed[i];
+                for &b in list {
+                    let b = b as usize;
+                    let xb = boundary.positions[b];
+                    let r = xi - xb;
+                    let dist = r.length();
+                    let mut coefficient = pi_term;
+                    let vr = (vi - boundary.velocities[b]).dot(r);
+                    if vr < 0.0 {
+                        let nu = params.wall_viscosity * h_visc * c / rho_i;
+                        coefficient += -nu * vr / (dist * dist + eps);
+                    }
+                    let force = mass * boundary.psi[b] * coefficient * kernel.grad(r, dist);
+                    let body = boundary.body[b] as usize;
+                    if let Some(impulse) = impulses.get_mut(body) {
+                        impulse.linear += force * dt;
+                        impulse.angular += (xb - boundary.body_centers[body]).perp_dot(force) * dt;
+                    }
                 }
             }
         }
 
-        // Diagnostics.
-        let (mut max_c, mut sum_c, mut count) = (0.0_f32, 0.0_f32, 0_u32);
-        for &rho in densities {
-            let compression = rho / rho0 - 1.0;
-            if compression > 0.0 {
-                max_c = max_c.max(compression);
-                sum_c += compression;
-                count += 1;
-            }
-        }
-        self.stats.max_compression = max_c;
-        self.stats.mean_compression = if count > 0 { sum_c / count as f32 } else { 0.0 };
-
-        // --- 5. Integrate (semi-implicit Euler).
+        // --- 3. Integrate (semi-implicit Euler), noting the top speed.
         let accelerations = &self.scratch.accelerations;
-        iter_mut!(self.velocities)
-            .zip(iter_mut!(self.positions))
-            .zip(iter!(accelerations))
-            .for_each(|((v, x), a)| {
-                *v = (*v + *a * dt).clamp_length_max(max_speed);
-                *x += *v * dt;
-            });
+        let top = max_reduce(
+            iter_mut!(self.velocities)
+                .zip(iter_mut!(self.positions))
+                .zip(iter!(accelerations))
+                .map(|((v, x), a)| {
+                    *v = (*v + *a * dt).clamp_length_max(max_speed);
+                    *x += *v * dt;
+                    v.length_squared()
+                }),
+        );
+        top.sqrt()
     }
 
     /// Safety net: push any particle that ended up inside a body back to its
