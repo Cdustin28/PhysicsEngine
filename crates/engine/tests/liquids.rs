@@ -239,7 +239,8 @@ fn an_emulsion_separates() {
     // settling that trades places at a droplet's sinking speed.
     let mut w = presets::tank(1.0, 2.0);
     let b = w.bodies.clone();
-    w.fluid.fill_rect(Vec2::new(-0.5, 0.0), Vec2::new(0.5, 0.8), &b);
+    w.fluid
+        .fill_rect(Vec2::new(-0.5, 0.0), Vec2::new(0.5, 0.8), &b);
     let d = w.fluid.params.particle_spacing;
     for i in 0..w.fluid.len() {
         let p = w.fluid.positions[i] / d;
