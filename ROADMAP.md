@@ -349,8 +349,8 @@ Not yet: undo in the Orbits tab, saving systems as files (they're kept between s
 **Goal:** real liquids with heat, and a Fluids tab: a 3D box (vacuum or 1 atm air) to place water, salt water, oil, mercury, and steam in, drawn as smooth surfaces. Delivered in steps:
 
 1. [x] CPU speed-up (#16)
-2. [x] **Several liquids** in the 2D and 3D tabs (this step)
-3. [ ] Heat in the liquids: temperature per particle, conduction, thermal expansion
+2. [x] **Several liquids** in the 2D and 3D tabs (#17)
+3. [x] **Heat in the liquids** (this step)
 4. [ ] Smooth-surface rendering (a toggle in 2D/3D, off by default)
 5. [ ] The Fluids tab: box, placing tools, solids, heat tools, readouts
 6. [ ] Air, boiling, and condensing
@@ -377,6 +377,24 @@ Not yet: undo in the Orbits tab, saving systems as files (they're kept between s
 
 - [x] **Sub-resolution settling:** SPH particles settle into a lattice that resists the tiny buoyancy force on a single particle, so liquids stirred together particle by particle (oil caught under water after a splash) stayed mixed forever. Now a heavier particle right above a lighter one of a different liquid trades places with it at the rate a droplet that size would sink: the lesser of its Stokes velocity Δρ g d²/18μ and its inertial terminal velocity √(g d Δρ/ρ). Trading identities moves nothing, so pressure isn't disturbed and mass is conserved. The Liquids example (four liquids in the wrong order) sorts to within 0.02 m of the ideal layer heights.
 - [x] All liquids share the heaviest one's Tait stiffness (and the CFL step uses the faster sound speed that gives the lighter ones): with each liquid's own, water under a slab of mercury compressed 25–30% and the rebound threw liquid out of the tank.
+
+**Heat in the liquids** (both engines):
+- [x] Every particle carries a temperature (stored in f64: in one substep conduction changes it by far less than an f32 can resolve at 300 K, and those changes were being rounded away).
+- [x] Conduction after Cleary & Monaghan (1999), with each liquid's real conductivity and specific heat (water 0.598 W/m·K and 4182 J/kg·K; mercury 8.3 and 139.5; oil 0.17 and 1970) and the harmonic mean across interfaces. Energy is conserved pair by pair.
+- [x] Thermal expansion: water follows Tanaka et al. (2001) (densest at 4 °C, 958 kg/m³ at 100 °C); oil and mercury expand linearly. Particle masses stay fixed; a warm particle's rest volume grows.
+- [x] Viscosity with temperature: Vogel's equation for water (1.00 → 0.28 mPa·s from 20 to 100 °C), Andrade fits for oil (57 → 8.5) and mercury.
+- [x] Sub-resolution settling now compares actual densities, so warm water below cold rises too, standing in for convection on scales smaller than a particle.
+- [x] Walls insulated by default, or held at a temperature (`wall_temperature`).
+- [x] The liquid's free surface trades heat with the smoke/heat grid by natural convection (h = 10 W/m²·K).
+- [x] Editor: a temperature for the liquid you place (up to 99 °C for water: boiling comes in step 6), and color by temperature in 2D and 3D.
+
+| Check (tests/heat.rs, heat3d.rs) | Result |
+|---|---|
+| Thermal energy, hot and cold halves (2D, 3D) | conserved to 10⁻⁶ |
+| Sine wave of temperature in mercury | decays at the heat equation's rate e^(−αk²t), within 15% |
+| Warm water at the bottom (2D blob, 3D layer) | rises |
+| Hot walls | heat the water, never past the wall temperature |
+| 80 °C water under the air grid | air gains heat; total energy conserved to 5% of what moved |
 
 Known limit: buoyant blobs that are resolved (several particles across) rise more slowly than real ones; a perfectly flat oil layer under water waits for a disturbance before it overturns, as it would in reality. An implicit incompressible solver (DFSPH) was tried and didn't help; it's parked.
 

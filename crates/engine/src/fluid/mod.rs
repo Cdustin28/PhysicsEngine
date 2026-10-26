@@ -40,7 +40,7 @@ use boundary::Boundary;
 use glam::Vec2;
 use grid::NeighborGrid;
 use kernel::{CubicSpline, cohesion_normalization, cohesion_shape};
-pub use materials::{Liquid, SEAWATER_SALINITY};
+pub use materials::{Liquid, LiquidSpec, ROOM_TEMPERATURE, SEAWATER_SALINITY};
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "parallel")]
@@ -128,6 +128,10 @@ pub struct FluidParams {
     /// diffuses on simulation time scales; tests raise it to check the
     /// diffusion itself.
     pub salt_diffusivity: f32,
+    /// Temperature the walls and bodies hold, K, or `None` for insulated
+    /// walls (no heat flows through them).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wall_temperature: Option<f32>,
 }
 
 impl Default for FluidParams {
@@ -145,6 +149,7 @@ impl Default for FluidParams {
             // otherwise launches spray off walls and corners in hard impacts.
             wall_viscosity: 0.5,
             salt_diffusivity: materials::SALT_DIFFUSIVITY,
+            wall_temperature: None,
         }
     }
 }
@@ -317,23 +322,19 @@ struct Packed {
     mu: f32,
     salinity: f32,
     liquid: u8,
+    /// K (f64: conduction changes temperatures by far less than an f32's
+    /// resolution at 300 K in one substep).
+    temperature: f64,
+    /// Thermal conductivity (2D: W/(m·K) × slab thickness).
+    k: f32,
+    /// Specific heat, J/(kg·K).
+    cp: f32,
 }
 
-/// A liquid's properties scaled to the simulation: densities and
-/// viscosities are per area in 2D (× the slab thickness implied by
-/// `rest_density`), tensions per length × thickness.
-#[derive(Debug, Clone, Copy)]
-struct Scaled {
-    /// ρ₀ / ρ₀(fresh water).
-    density_ratio: f32,
-    mu: f32,
-}
-
-fn scaled(liquid: Liquid, salinity: f32, scale: f32) -> Scaled {
-    Scaled {
-        density_ratio: liquid.density(salinity) / materials::WATER_DENSITY,
-        mu: liquid.viscosity(salinity) * scale,
-    }
+/// A liquid's density relative to fresh water's, at 20 °C. Particle
+/// masses are set by it (so they never change with temperature).
+fn density_ratio(liquid: Liquid, salinity: f32) -> f32 {
+    liquid.density(salinity) / materials::WATER_DENSITY
 }
 
 /// Scratch arrays reused across substeps.
@@ -347,6 +348,8 @@ struct Scratch {
     accelerations: Vec<Vec2>,
     /// d(salinity)/dt from diffusion.
     salinity_rates: Vec<f32>,
+    /// dT/dt from conduction.
+    temperature_rates: Vec<f32>,
     fluid_neighbors: Vec<Vec<u32>>,
     boundary_neighbors: Vec<Vec<u32>>,
     grid: NeighborGrid,
@@ -381,6 +384,10 @@ pub struct Fluid {
     /// (seawater: 0.035). Omitted when all are fresh.
     #[serde(default, skip_serializing_if = "all_fresh")]
     pub salinity: Vec<f32>,
+    /// Each particle's temperature, K. Omitted when all are at room
+    /// temperature (and missing entries mean room temperature).
+    #[serde(default, skip_serializing_if = "all_room_temperature")]
+    pub temperatures: Vec<f64>,
     #[serde(skip)]
     scratch: Scratch,
     #[serde(skip)]
@@ -399,6 +406,10 @@ fn all_fresh(v: &[f32]) -> bool {
     v.iter().all(|&s| s == 0.0)
 }
 
+fn all_room_temperature(v: &[f64]) -> bool {
+    v.iter().all(|&t| t == f64::from(ROOM_TEMPERATURE))
+}
+
 impl PartialEq for Fluid {
     /// Two fluids are equal if their saved state is: scratch space and
     /// statistics don't count.
@@ -406,12 +417,14 @@ impl PartialEq for Fluid {
         let vel = |f: &Fluid, i: usize| f.velocities.get(i).copied().unwrap_or(Vec2::ZERO);
         let liquid = |f: &Fluid, i: usize| f.liquids.get(i).copied().unwrap_or_default();
         let salt = |f: &Fluid, i: usize| f.salinity.get(i).copied().unwrap_or(0.0);
+        let temp = |f: &Fluid, i: usize| f.temperature(i);
         self.params == other.params
             && self.positions == other.positions
             && (0..self.positions.len()).all(|i| {
                 vel(self, i) == vel(other, i)
                     && liquid(self, i) == liquid(other, i)
                     && salt(self, i) == salt(other, i)
+                    && temp(self, i) == temp(other, i)
             })
     }
 }
@@ -443,6 +456,7 @@ impl Fluid {
         self.velocities.clear();
         self.liquids.clear();
         self.salinity.clear();
+        self.temperatures.clear();
         self.stats = FluidStats::default();
     }
 
@@ -453,6 +467,39 @@ impl Fluid {
         self.velocities.resize(n, Vec2::ZERO);
         self.liquids.resize(n, Liquid::Water);
         self.salinity.resize(n, 0.0);
+        self.temperatures.resize(n, f64::from(ROOM_TEMPERATURE));
+    }
+
+    /// True if particle `i` was at a free surface in the last step (its
+    /// neighborhood less than 90% full), so it touches air.
+    pub fn is_surface(&self, i: usize) -> bool {
+        let Some(&rho) = self.scratch.densities.get(i) else {
+            return false;
+        };
+        rho * self.particle_volume() < 0.9 * self.mass(i)
+    }
+
+    /// Particle `i`'s temperature, K.
+    pub fn temperature(&self, i: usize) -> f32 {
+        self.temperatures
+            .get(i)
+            .map_or(ROOM_TEMPERATURE, |&t| t as f32)
+    }
+
+    /// Particle `i`'s heat content above 0 K at constant specific heat,
+    /// m c T, J. Differences in it are what conduction moves around.
+    pub fn thermal_energy(&self) -> f64 {
+        (0..self.positions.len())
+            .map(|i| {
+                let s = self.salinity.get(i).copied().unwrap_or(0.0);
+                f64::from(self.mass(i) * self.liquid(i).specific_heat(s))
+                    * self
+                        .temperatures
+                        .get(i)
+                        .copied()
+                        .unwrap_or(f64::from(ROOM_TEMPERATURE))
+            })
+            .sum()
     }
 
     /// Particle `i`'s liquid.
@@ -538,6 +585,15 @@ impl Fluid {
         if !self.salinity.iter().all(|s| (0.0..=0.4).contains(s)) {
             return Err("salinity must be between 0 and 0.4".into());
         }
+        if !self.temperatures.is_empty() && self.temperatures.len() != n {
+            return Err(format!(
+                "fluid has {n} positions but {} temperatures",
+                self.temperatures.len()
+            ));
+        }
+        if !self.temperatures.iter().all(|t| t.is_finite() && *t > 0.0) {
+            return Err("temperatures must be positive (kelvin)".into());
+        }
         Ok(())
     }
 
@@ -560,15 +616,14 @@ impl Fluid {
         i_range: std::ops::RangeInclusive<i32>,
         j_range: std::ops::RangeInclusive<i32>,
         bodies: &[RigidBody],
-        liquid: Liquid,
-        salinity: f32,
+        spec: LiquidSpec,
         inside: impl Fn(Vec2) -> bool,
     ) -> usize {
-        let salinity = if liquid == Liquid::Water {
-            salinity.clamp(0.0, 0.4)
-        } else {
-            0.0
-        };
+        let (liquid, salinity, temperature) = (
+            spec.liquid,
+            spec.stored_salinity(),
+            spec.temperature.max(1.0),
+        );
         self.fill_missing_velocities();
         let d = self.params.particle_spacing;
         let existing = NeighborGrid::build(&self.positions, d);
@@ -595,6 +650,7 @@ impl Fluid {
                     self.velocities.push(Vec2::ZERO);
                     self.liquids.push(liquid);
                     self.salinity.push(salinity);
+                    self.temperatures.push(f64::from(temperature));
                 }
             }
         }
@@ -616,13 +672,29 @@ impl Fluid {
         liquid: Liquid,
         salinity: f32,
     ) -> usize {
+        self.fill_rect_as(
+            a,
+            b,
+            bodies,
+            LiquidSpec::new(liquid).with_salinity(salinity),
+        )
+    }
+
+    /// [`Self::fill_rect`] with any liquid, salinity, and temperature.
+    pub fn fill_rect_as(
+        &mut self,
+        a: Vec2,
+        b: Vec2,
+        bodies: &[RigidBody],
+        spec: LiquidSpec,
+    ) -> usize {
         let (min, max) = (a.min(b), a.max(b));
         let d = self.params.particle_spacing;
         let i0 = (min.x / d - 0.5).ceil() as i32;
         let i1 = (max.x / d - 0.5).floor() as i32;
         let j0 = (min.y / d - 0.5).ceil() as i32;
         let j1 = (max.y / d - 0.5).floor() as i32;
-        self.fill_where(i0..=i1, j0..=j1, bodies, liquid, salinity, |_| true)
+        self.fill_where(i0..=i1, j0..=j1, bodies, spec, |_| true)
     }
 
     /// Fill a disc with fresh water at rest (the brush tool).
@@ -639,12 +711,28 @@ impl Fluid {
         liquid: Liquid,
         salinity: f32,
     ) -> usize {
+        self.fill_disc_as(
+            center,
+            radius,
+            bodies,
+            LiquidSpec::new(liquid).with_salinity(salinity),
+        )
+    }
+
+    /// [`Self::fill_disc`] with any liquid, salinity, and temperature.
+    pub fn fill_disc_as(
+        &mut self,
+        center: Vec2,
+        radius: f32,
+        bodies: &[RigidBody],
+        spec: LiquidSpec,
+    ) -> usize {
         let d = self.params.particle_spacing;
         let i0 = ((center.x - radius) / d - 0.5).ceil() as i32;
         let i1 = ((center.x + radius) / d - 0.5).floor() as i32;
         let j0 = ((center.y - radius) / d - 0.5).ceil() as i32;
         let j1 = ((center.y + radius) / d - 0.5).floor() as i32;
-        self.fill_where(i0..=i1, j0..=j1, bodies, liquid, salinity, |p| {
+        self.fill_where(i0..=i1, j0..=j1, bodies, spec, |p| {
             (p - center).length_squared() <= radius * radius
         })
     }
@@ -665,6 +753,7 @@ impl Fluid {
                 self.velocities[w] = self.velocities[r];
                 self.liquids[w] = self.liquids[r];
                 self.salinity[w] = self.salinity[r];
+                self.temperatures[w] = self.temperatures[r];
                 w += 1;
             }
         }
@@ -672,6 +761,7 @@ impl Fluid {
         self.velocities.truncate(w);
         self.liquids.truncate(w);
         self.salinity.truncate(w);
+        self.temperatures.truncate(w);
         before - w
     }
 
@@ -728,34 +818,44 @@ impl Fluid {
     }
 
     /// Lets liquids separate where SPH can't resolve it: when a heavier
-    /// particle sits right above a lighter one of a different liquid (say
-    /// oil caught under water as single particles after a splash), the two
+    /// particle sits right above a lighter one (say oil caught under water
+    /// as single particles after a splash, or cold water over warm), the two
     /// trade places at the rate a droplet that size would sink through the
     /// other liquid: the lesser of its Stokes velocity Δρ g d² / 18μ and its
     /// inertial terminal velocity √(g d Δρ/ρ).
     ///
     /// Without this, liquids stirred together at the particle scale stay
     /// mixed forever: SPH particles settle into a lattice that resists the
-    /// tiny buoyancy force on a single particle. Trading identities (liquid
-    /// and salinity; velocities stay with positions) moves nothing, so it
-    /// doesn't disturb the pressure field, and mass is conserved.
+    /// tiny buoyancy force on a single particle. Trading identities (liquid,
+    /// salinity, and temperature; velocities stay with positions) moves
+    /// nothing, so it doesn't disturb the pressure field, and mass and heat
+    /// are conserved. For warm and cold water this stands in for convection
+    /// on scales smaller than a particle.
     fn settle_unresolved(&mut self, gravity: Vec2, dt: f32) {
         let g = gravity.length();
-        let (heavy, light) = self.density_ratio_range();
-        if g == 0.0 || heavy / light < 1.0005 {
-            return;
-        }
         let n = self.positions.len();
-        if self.scratch.fluid_neighbors.len() != n {
+        if g == 0.0 || self.scratch.fluid_neighbors.len() != n {
             return;
         }
         let down = gravity / g;
         let d = self.params.particle_spacing;
         let density: Vec<f32> = (0..n)
-            .map(|i| self.liquid(i).density(self.salinity[i]))
+            .map(|i| {
+                self.liquid(i)
+                    .density_at(self.salinity[i], self.temperatures[i] as f32)
+            })
             .collect();
+        let (lightest, heaviest) = density
+            .iter()
+            .fold((f32::MAX, 0.0_f32), |(lo, hi), &r| (lo.min(r), hi.max(r)));
+        if heaviest < 1.0005 * lightest {
+            return;
+        }
         let viscosity: Vec<f32> = (0..n)
-            .map(|i| self.liquid(i).viscosity(self.salinity[i]))
+            .map(|i| {
+                self.liquid(i)
+                    .viscosity_at(self.salinity[i], self.temperatures[i] as f32)
+            })
             .collect();
         let mut taken = vec![false; n];
         for i in 0..n {
@@ -767,15 +867,17 @@ impl Fluid {
             let mut best: Option<(usize, f32)> = None;
             for &j in &self.scratch.fluid_neighbors[i] {
                 let j = j as usize;
-                if taken[j]
-                    || self.liquids[j] == self.liquids[i] && self.salinity[j] == self.salinity[i]
-                {
+                if taken[j] {
                     continue;
                 }
                 let r = self.positions[j] - xi;
                 let along = r.dot(down);
                 let excess = density[i] - density[j];
-                if along > 0.7 * r.length() && excess > 0.0 && best.is_none_or(|(_, e)| excess > e)
+                // Ignore differences too small to matter (and identical
+                // particles), so still, uniform liquid is left alone.
+                if along > 0.7 * r.length()
+                    && excess > 5e-4 * density[i]
+                    && best.is_none_or(|(_, e)| excess > e)
                 {
                     best = Some((j, excess));
                 }
@@ -796,6 +898,7 @@ impl Fluid {
             if roll < chance {
                 self.liquids.swap(i, j);
                 self.salinity.swap(i, j);
+                self.temperatures.swap(i, j);
                 taken[i] = true;
                 taken[j] = true;
             }
@@ -911,6 +1014,10 @@ impl Fluid {
         self.velocities = order.iter().map(|&i| self.velocities[i as usize]).collect();
         self.liquids = order.iter().map(|&i| self.liquids[i as usize]).collect();
         self.salinity = order.iter().map(|&i| self.salinity[i as usize]).collect();
+        self.temperatures = order
+            .iter()
+            .map(|&i| self.temperatures[i as usize])
+            .collect();
     }
 
     /// One substep. Three parallel passes over the particles, so threads
@@ -969,6 +1076,16 @@ impl Fluid {
         let effects = self.effects(gravity);
         let (use_viscosity, use_cohesion) = (effects.viscosity, effects.surface_tension);
         let use_salt = salt_d > 0.0 && self.salinity.iter().any(|&s| s > 0.0);
+        // Conduction only matters once temperatures differ (or a wall holds
+        // a temperature).
+        let wall_t = params.wall_temperature;
+        let use_heat = wall_t.is_some() || {
+            let (lo, hi) = self
+                .temperatures
+                .iter()
+                .fold((f64::MAX, f64::MIN), |(lo, hi), &t| (lo.min(t), hi.max(t)));
+            hi > lo
+        };
 
         let Scratch {
             densities,
@@ -976,6 +1093,7 @@ impl Fluid {
             packed,
             accelerations,
             salinity_rates,
+            temperature_rates,
             fluid_neighbors,
             boundary_neighbors,
             grid,
@@ -984,6 +1102,7 @@ impl Fluid {
         let velocities = &self.velocities;
         let liquids = &self.liquids;
         let salinity = &self.salinity;
+        let temperatures = &self.temperatures;
 
         // --- 1. Neighbors within the kernel support, number density (the
         // particle itself counts too), density, and Tait pressure, clamped
@@ -1023,11 +1142,14 @@ impl Fluid {
                         delta += boundary.psi[b] / m_ref * kernel.w(r2.sqrt());
                     }
                 });
-                let (liquid, s) = (liquids[i], salinity[i]);
-                let props = scaled(liquid, s, scale);
-                let mass = m_ref * props.density_ratio;
+                let (liquid, s, t64) = (liquids[i], salinity[i], temperatures[i]);
+                let t = t64 as f32;
+                let mass = m_ref * density_ratio(liquid, s);
+                // Warm liquid wants more room: its rest volume grows as its
+                // density falls.
+                let volume_ratio = 1.0 / liquid.expansion_factor(t);
                 *rho = mass * delta;
-                *p = (stiff * ((delta * v0).powi(TAIT_GAMMA) - 1.0)).max(0.0);
+                *p = (stiff * ((delta * v0 * volume_ratio).powi(TAIT_GAMMA) - 1.0)).max(0.0);
                 *packed = Packed {
                     x: xi,
                     v: velocities[i],
@@ -1035,9 +1157,12 @@ impl Fluid {
                     delta,
                     term: *p / (delta * delta),
                     mass,
-                    mu: props.mu,
+                    mu: liquid.viscosity_at(s, t) * scale,
                     salinity: s,
                     liquid: liquid.index() as u8,
+                    temperature: t64,
+                    k: liquid.conductivity(s) * scale,
+                    cp: liquid.specific_heat(s),
                 };
             });
         let fluid_neighbors = &*fluid_neighbors;
@@ -1050,15 +1175,18 @@ impl Fluid {
         // diffusion of salt between water particles.
         accelerations.resize(n, Vec2::ZERO);
         salinity_rates.resize(n, 0.0);
+        temperature_rates.resize(n, 0.0);
         iter_mut!(accelerations)
             .zip(iter_mut!(salinity_rates))
+            .zip(iter_mut!(temperature_rates))
             .enumerate()
-            .for_each(|(i, (acc, ds))| {
+            .for_each(|(i, ((acc, ds), dtemp))| {
                 let pi = packed[i];
                 let inv_m = 1.0 / pi.mass;
                 let li = pi.liquid as usize;
                 let mut a = gravity;
                 let mut salt = 0.0;
+                let mut heat = 0.0;
 
                 for &j in &fluid_neighbors[i] {
                     let pj = packed[j as usize];
@@ -1085,6 +1213,15 @@ impl Fluid {
                     if use_cohesion && dist > 1e-9 {
                         let f = k[li][pj.liquid as usize] * cohesion_shape(dist / h);
                         a -= inv_m * f / dist * r;
+                    }
+                    // Conduction (Cleary & Monaghan 1999), with the harmonic
+                    // mean of the two conductivities so heat crosses an
+                    // interface at the right rate. Energy is conserved
+                    // pair by pair.
+                    if use_heat {
+                        let k_ij = 4.0 * pi.k * pj.k / (pi.k + pj.k);
+                        let diff = (pi.temperature - pj.temperature) as f32;
+                        heat += k_ij * diff * rg / (pj.delta * r2e);
                     }
                     if use_salt && pi.liquid == water && pj.liquid == water {
                         salt += 2.0 * salt_d * v0 * (pi.salinity - pj.salinity) * rg / r2e;
@@ -1113,8 +1250,21 @@ impl Fluid {
                             * v_ib;
                     }
                 }
+                if let (true, Some(tw)) = (use_heat, wall_t) {
+                    // Walls held at `tw`, conducting like this liquid.
+                    for &b in &boundary_neighbors[i] {
+                        let b = b as usize;
+                        let r = pi.x - boundary.positions[b];
+                        let dist = r.length();
+                        let w = boundary.psi[b] / m_ref;
+                        let rg = r.dot(kernel.grad(r, dist));
+                        let diff = (pi.temperature - f64::from(tw)) as f32;
+                        heat += 2.0 * pi.k * w * v0 * diff * rg / (dist * dist + eps);
+                    }
+                }
                 *acc = a;
                 *ds = salt;
+                *dtemp = heat / (pi.mass * pi.delta * pi.cp);
             });
 
         // --- 2b. Reaction on bodies: for every fluid-boundary pair, the
@@ -1161,6 +1311,12 @@ impl Fluid {
             iter_mut!(self.salinity)
                 .zip(iter!(salinity_rates))
                 .for_each(|(s, ds)| *s = (*s + ds * dt).max(0.0));
+        }
+        if use_heat {
+            let temperature_rates = &self.scratch.temperature_rates;
+            iter_mut!(self.temperatures)
+                .zip(iter!(temperature_rates))
+                .for_each(|(t, dtemp)| *t = (*t + f64::from(dtemp * dt)).max(1.0));
         }
         let top = max_reduce(
             iter_mut!(self.velocities)

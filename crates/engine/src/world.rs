@@ -306,6 +306,7 @@ impl World {
                 gas.step(&self.bodies, self.gravity, self.gas_clock);
                 self.gas_clock = 0.0;
             }
+            exchange_heat(gas, &mut self.fluid, dt);
         }
         self.time += f64::from(dt);
     }
@@ -421,6 +422,50 @@ impl Default for FixedTimestep {
     /// something at least this small.
     fn default() -> Self {
         Self::new(1.0 / 120.0)
+    }
+}
+
+/// Heat passing between the liquid's free surface and the air grid around
+/// it, by natural convection: q = h A ΔT with h = 10 W/(m²·K) and A one
+/// particle's face (d × the slab thickness). Energy leaves one side exactly
+/// as it enters the other, and each exchange stops at the pair's common
+/// temperature.
+fn exchange_heat(gas: &mut crate::gas::Gas, fluid: &mut crate::fluid::Fluid, dt: f32) {
+    const H: f32 = 10.0;
+    const AIR_DENSITY: f32 = 1.204;
+    const AIR_SPECIFIC_HEAT: f32 = 1005.0;
+    if fluid.is_empty() || fluid.temperatures.len() != fluid.len() {
+        return;
+    }
+    let d = fluid.params.particle_spacing;
+    // The 2D world is a slab; its thickness is what makes `rest_density`
+    // a mass per area (10 kg/m² of water is 1 cm thick).
+    let thickness = fluid.params.rest_density / materials::WATER_DENSITY;
+    let area = d * thickness;
+    let cell_capacity = AIR_DENSITY * AIR_SPECIFIC_HEAT * gas.cell * gas.cell * thickness;
+    let ambient = f64::from(gas.params.ambient_temperature);
+    for i in 0..fluid.len() {
+        if !fluid.is_surface(i) {
+            continue;
+        }
+        let rel = (fluid.positions[i] - gas.origin) / gas.cell;
+        if rel.min_element() < 0.0 {
+            continue;
+        }
+        let (ci, cj) = (rel.x as usize, rel.y as usize);
+        if ci >= gas.nx || cj >= gas.ny || gas.is_solid(ci, cj) {
+            continue;
+        }
+        let c = cj * gas.nx + ci;
+        let s = fluid.salinity.get(i).copied().unwrap_or(0.0);
+        let particle_capacity = fluid.mass(i) * fluid.liquid(i).specific_heat(s);
+        let air_t = ambient + f64::from(gas.heat[c]);
+        let diff = (air_t - fluid.temperatures[i]) as f32;
+        let equilibrium =
+            diff * particle_capacity * cell_capacity / (particle_capacity + cell_capacity);
+        let q = (H * area * diff * dt).clamp(-equilibrium.abs(), equilibrium.abs());
+        fluid.temperatures[i] += f64::from(q / particle_capacity);
+        gas.heat[c] -= q / cell_capacity;
     }
 }
 
