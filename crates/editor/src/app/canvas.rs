@@ -391,15 +391,27 @@ impl EditorApp {
                 if response.drag_stopped_by(PointerButton::Primary)
                     && let (Some(a), Some(b)) = (self.fluid_rect_start.take(), pointer)
                 {
-                    let added = self.world.fluid.fill_rect(a, b, &self.world.bodies);
-                    self.status = format!("Added {added} particles.");
+                    let c = self.liquid;
+                    let added = self.world.fluid.fill_rect_with(
+                        a,
+                        b,
+                        &self.world.bodies,
+                        c.liquid(),
+                        c.salinity(),
+                    );
+                    self.status = format!("Added {added} particles of {}.", c.noun());
                 }
             }
             (Tool::Fluid, FluidShape::Brush) => {
                 if painting && let Some(p) = pointer {
-                    self.world
-                        .fluid
-                        .fill_disc(p, self.brush_radius, &self.world.bodies);
+                    let c = self.liquid;
+                    self.world.fluid.fill_disc_with(
+                        p,
+                        self.brush_radius,
+                        &self.world.bodies,
+                        c.liquid(),
+                        c.salinity(),
+                    );
                 }
             }
             (Tool::Erase, _) => {
@@ -462,7 +474,8 @@ impl EditorApp {
                 }
                 ColorBy::Pressure => pressures.get(i).map_or(0.0, |&q| q / full_pressure),
             };
-            lerp_color(WATER_DEEP, WATER_LIGHT, t.clamp(0.0, 1.0))
+            let salinity = fluid.salinity.get(i).copied().unwrap_or(0.0);
+            crate::liquid_ui::particle_color(fluid.liquid(i), salinity, t, WATER_DEEP, WATER_LIGHT)
         };
 
         if self.gpu_render {
@@ -618,9 +631,4 @@ impl EditorApp {
             }
         }
     }
-}
-
-fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
-    let mix = |x: u8, y: u8| (f32::from(x) + (f32::from(y) - f32::from(x)) * t).round() as u8;
-    Color32::from_rgb(mix(a.r(), b.r()), mix(a.g(), b.g()), mix(a.b(), b.b()))
 }

@@ -39,7 +39,8 @@ use crate::broad_phase::Aabb;
 use boundary::Boundary;
 use glam::Vec2;
 use grid::NeighborGrid;
-use kernel::CubicSpline;
+use kernel::{CubicSpline, cohesion_normalization, cohesion_shape};
+pub use materials::{Liquid, SEAWATER_SALINITY};
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "parallel")]
@@ -122,6 +123,11 @@ pub struct FluidParams {
     pub viscosity: f32,
     /// Artificial viscosity between fluid and bodies (wall friction).
     pub wall_viscosity: f32,
+    /// Diffusivity of salt in water, m²/s. The real value
+    /// ([`materials::SALT_DIFFUSIVITY`]) is so small that salt barely
+    /// diffuses on simulation time scales; tests raise it to check the
+    /// diffusion itself.
+    pub salt_diffusivity: f32,
 }
 
 impl Default for FluidParams {
@@ -130,12 +136,15 @@ impl Default for FluidParams {
             particle_spacing: 0.05,
             rest_density: 10.0,
             speed_of_sound: 20.0,
-            viscosity: 0.05,
+            // Low enough that small density differences (oil on water)
+            // still drive flow; 0.05 froze a rising blob of oil in place.
+            viscosity: 0.01,
             // Higher than the fluid's own viscosity on purpose: it damps
             // particles before they reach the zone right at a wall where
             // single-layer boundary handling over-counts density, which
             // otherwise launches spray off walls and corners in hard impacts.
             wall_viscosity: 0.5,
+            salt_diffusivity: materials::SALT_DIFFUSIVITY,
         }
     }
 }
@@ -211,6 +220,7 @@ impl FluidParams {
         for (name, v) in [
             ("viscosity", self.viscosity),
             ("wall_viscosity", self.wall_viscosity),
+            ("salt_diffusivity", self.salt_diffusivity),
         ] {
             if !(v.is_finite() && v >= 0.0) {
                 return Err(format!("fluid {name} must be non-negative, got {v}"));
@@ -270,6 +280,15 @@ impl FluidSolver for CpuSolver {
     }
 }
 
+/// Which optional physics a step includes (see [`Fluid::effects`]).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Effects {
+    /// The liquids' real viscosity.
+    pub viscosity: bool,
+    /// Surface and interfacial tension.
+    pub surface_tension: bool,
+}
+
 /// Diagnostics from the most recent step.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct FluidStats {
@@ -286,9 +305,35 @@ pub struct FluidStats {
 struct Packed {
     x: Vec2,
     v: Vec2,
+    /// Mass density ρ = m δ, kg/m².
     rho: f32,
-    /// p / ρ², the factor the pressure force uses.
+    /// Number density δ = Σ W, 1/m².
+    delta: f32,
+    /// p / δ², the factor the pressure force uses.
     term: f32,
+    /// Particle mass, kg.
+    mass: f32,
+    /// Dynamic viscosity (2D: Pa·s × slab thickness).
+    mu: f32,
+    salinity: f32,
+    liquid: u8,
+}
+
+/// A liquid's properties scaled to the simulation: densities and
+/// viscosities are per area in 2D (× the slab thickness implied by
+/// `rest_density`), tensions per length × thickness.
+#[derive(Debug, Clone, Copy)]
+struct Scaled {
+    /// ρ₀ / ρ₀(fresh water).
+    density_ratio: f32,
+    mu: f32,
+}
+
+fn scaled(liquid: Liquid, salinity: f32, scale: f32) -> Scaled {
+    Scaled {
+        density_ratio: liquid.density(salinity) / materials::WATER_DENSITY,
+        mu: liquid.viscosity(salinity) * scale,
+    }
 }
 
 /// Scratch arrays reused across substeps.
@@ -300,6 +345,8 @@ struct Scratch {
     /// lookup fetches it all.
     packed: Vec<Packed>,
     accelerations: Vec<Vec2>,
+    /// d(salinity)/dt from diffusion.
+    salinity_rates: Vec<f32>,
     fluid_neighbors: Vec<Vec<u32>>,
     boundary_neighbors: Vec<Vec<u32>>,
     grid: NeighborGrid,
@@ -326,6 +373,14 @@ pub struct Fluid {
     /// Omitted from scene files when every particle is at rest.
     #[serde(default, skip_serializing_if = "all_zero")]
     pub velocities: Vec<Vec2>,
+    /// Each particle's liquid. Omitted from scene files when all are water
+    /// (and missing entries mean water).
+    #[serde(default, skip_serializing_if = "all_water")]
+    pub liquids: Vec<Liquid>,
+    /// Each water particle's salinity, the mass fraction of dissolved salt
+    /// (seawater: 0.035). Omitted when all are fresh.
+    #[serde(default, skip_serializing_if = "all_fresh")]
+    pub salinity: Vec<f32>,
     #[serde(skip)]
     scratch: Scratch,
     #[serde(skip)]
@@ -336,14 +391,28 @@ fn all_zero(v: &[Vec2]) -> bool {
     v.iter().all(|&x| x == Vec2::ZERO)
 }
 
+fn all_water(v: &[Liquid]) -> bool {
+    v.iter().all(|&l| l == Liquid::Water)
+}
+
+fn all_fresh(v: &[f32]) -> bool {
+    v.iter().all(|&s| s == 0.0)
+}
+
 impl PartialEq for Fluid {
     /// Two fluids are equal if their saved state is: scratch space and
     /// statistics don't count.
     fn eq(&self, other: &Self) -> bool {
         let vel = |f: &Fluid, i: usize| f.velocities.get(i).copied().unwrap_or(Vec2::ZERO);
+        let liquid = |f: &Fluid, i: usize| f.liquids.get(i).copied().unwrap_or_default();
+        let salt = |f: &Fluid, i: usize| f.salinity.get(i).copied().unwrap_or(0.0);
         self.params == other.params
             && self.positions == other.positions
-            && (0..self.positions.len()).all(|i| vel(self, i) == vel(other, i))
+            && (0..self.positions.len()).all(|i| {
+                vel(self, i) == vel(other, i)
+                    && liquid(self, i) == liquid(other, i)
+                    && salt(self, i) == salt(other, i)
+            })
     }
 }
 
@@ -372,12 +441,43 @@ impl Fluid {
     pub fn clear(&mut self) {
         self.positions.clear();
         self.velocities.clear();
+        self.liquids.clear();
+        self.salinity.clear();
         self.stats = FluidStats::default();
     }
 
-    /// Scene files may omit velocities; treat missing ones as zero.
+    /// Scene files may omit velocities, liquids, and salinities; treat
+    /// missing ones as zero velocity and fresh water.
     pub fn fill_missing_velocities(&mut self) {
-        self.velocities.resize(self.positions.len(), Vec2::ZERO);
+        let n = self.positions.len();
+        self.velocities.resize(n, Vec2::ZERO);
+        self.liquids.resize(n, Liquid::Water);
+        self.salinity.resize(n, 0.0);
+    }
+
+    /// Particle `i`'s liquid.
+    pub fn liquid(&self, i: usize) -> Liquid {
+        self.liquids.get(i).copied().unwrap_or_default()
+    }
+
+    /// True if every particle is fresh water (the GPU solver handles only
+    /// that so far).
+    pub fn is_fresh_water(&self) -> bool {
+        all_water(&self.liquids) && all_fresh(&self.salinity)
+    }
+
+    /// Volume of every particle at rest, m² (2D): the reference mass over
+    /// the reference density. All liquids use the same spacing, so a
+    /// particle of liquid L weighs ρ₀(L) × this.
+    pub fn particle_volume(&self) -> f32 {
+        self.params.particle_mass() / self.params.rest_density
+    }
+
+    /// Particle `i`'s mass, kg.
+    pub fn mass(&self, i: usize) -> f32 {
+        let salinity = self.salinity.get(i).copied().unwrap_or(0.0);
+        let ratio = self.liquid(i).density(salinity) / materials::WATER_DENSITY;
+        self.params.particle_mass() * ratio
     }
 
     /// Density of each particle from the last substep, kg/m². Empty before
@@ -422,6 +522,22 @@ impl Fluid {
         {
             return Err("fluid positions and velocities must be finite".into());
         }
+        let n = self.positions.len();
+        if !self.liquids.is_empty() && self.liquids.len() != n {
+            return Err(format!(
+                "fluid has {n} positions but {} liquids",
+                self.liquids.len()
+            ));
+        }
+        if !self.salinity.is_empty() && self.salinity.len() != n {
+            return Err(format!(
+                "fluid has {n} positions but {} salinities",
+                self.salinity.len()
+            ));
+        }
+        if !self.salinity.iter().all(|s| (0.0..=0.4).contains(s)) {
+            return Err("salinity must be between 0 and 0.4".into());
+        }
         Ok(())
     }
 
@@ -438,13 +554,21 @@ impl Fluid {
 
     /// Add particles at every free lattice point for which `inside` is true,
     /// within the lattice index ranges given. Returns how many were added.
+    #[allow(clippy::too_many_arguments)]
     fn fill_where(
         &mut self,
         i_range: std::ops::RangeInclusive<i32>,
         j_range: std::ops::RangeInclusive<i32>,
         bodies: &[RigidBody],
+        liquid: Liquid,
+        salinity: f32,
         inside: impl Fn(Vec2) -> bool,
     ) -> usize {
+        let salinity = if liquid == Liquid::Water {
+            salinity.clamp(0.0, 0.4)
+        } else {
+            0.0
+        };
         self.fill_missing_velocities();
         let d = self.params.particle_spacing;
         let existing = NeighborGrid::build(&self.positions, d);
@@ -469,32 +593,58 @@ impl Fluid {
                 if !crowded && !blocked {
                     self.positions.push(p);
                     self.velocities.push(Vec2::ZERO);
+                    self.liquids.push(liquid);
+                    self.salinity.push(salinity);
                 }
             }
         }
         self.positions.len() - before
     }
 
-    /// Fill the rectangle between `a` and `b` with fluid at rest, skipping
-    /// space taken by bodies or existing fluid.
+    /// Fill the rectangle between `a` and `b` with fresh water at rest,
+    /// skipping space taken by bodies or existing fluid.
     pub fn fill_rect(&mut self, a: Vec2, b: Vec2, bodies: &[RigidBody]) -> usize {
+        self.fill_rect_with(a, b, bodies, Liquid::Water, 0.0)
+    }
+
+    /// [`Self::fill_rect`] with any liquid (salinity applies to water).
+    pub fn fill_rect_with(
+        &mut self,
+        a: Vec2,
+        b: Vec2,
+        bodies: &[RigidBody],
+        liquid: Liquid,
+        salinity: f32,
+    ) -> usize {
         let (min, max) = (a.min(b), a.max(b));
         let d = self.params.particle_spacing;
         let i0 = (min.x / d - 0.5).ceil() as i32;
         let i1 = (max.x / d - 0.5).floor() as i32;
         let j0 = (min.y / d - 0.5).ceil() as i32;
         let j1 = (max.y / d - 0.5).floor() as i32;
-        self.fill_where(i0..=i1, j0..=j1, bodies, |_| true)
+        self.fill_where(i0..=i1, j0..=j1, bodies, liquid, salinity, |_| true)
     }
 
-    /// Fill a disc with fluid at rest (the brush tool).
+    /// Fill a disc with fresh water at rest (the brush tool).
     pub fn fill_disc(&mut self, center: Vec2, radius: f32, bodies: &[RigidBody]) -> usize {
+        self.fill_disc_with(center, radius, bodies, Liquid::Water, 0.0)
+    }
+
+    /// [`Self::fill_disc`] with any liquid.
+    pub fn fill_disc_with(
+        &mut self,
+        center: Vec2,
+        radius: f32,
+        bodies: &[RigidBody],
+        liquid: Liquid,
+        salinity: f32,
+    ) -> usize {
         let d = self.params.particle_spacing;
         let i0 = ((center.x - radius) / d - 0.5).ceil() as i32;
         let i1 = ((center.x + radius) / d - 0.5).floor() as i32;
         let j0 = ((center.y - radius) / d - 0.5).ceil() as i32;
         let j1 = ((center.y + radius) / d - 0.5).floor() as i32;
-        self.fill_where(i0..=i1, j0..=j1, bodies, |p| {
+        self.fill_where(i0..=i1, j0..=j1, bodies, liquid, salinity, |p| {
             (p - center).length_squared() <= radius * radius
         })
     }
@@ -513,11 +663,15 @@ impl Fluid {
             if keep(self.positions[r]) {
                 self.positions[w] = self.positions[r];
                 self.velocities[w] = self.velocities[r];
+                self.liquids[w] = self.liquids[r];
+                self.salinity[w] = self.salinity[r];
                 w += 1;
             }
         }
         self.positions.truncate(w);
         self.velocities.truncate(w);
+        self.liquids.truncate(w);
+        self.salinity.truncate(w);
         before - w
     }
 
@@ -549,27 +703,186 @@ impl Fluid {
         let c = self.params.speed_of_sound;
         let d = self.params.particle_spacing;
         let max_speed = MAX_SPEED_FRACTION * c;
+        // Every liquid shares the heaviest one's stiffness (see
+        // `stiffness_ratio`), so the lighter ones carry sound faster.
+        let (heavy, light) = self.density_ratio_range();
+        let c_eff = c * (heavy / light).sqrt();
 
         let mut elapsed = 0.0;
         let mut substeps = 0;
         let mut v_max = max_reduce(iter!(self.velocities).map(|v| v.length_squared())).sqrt();
+        let material_limit = self.material_dt_limit();
         // The 1e-6 guard stops a sliver of round-off from costing a whole
         // extra substep.
         while dt - elapsed > 1e-6 {
-            let h = (CFL * d / (c + v_max)).min(dt - elapsed);
+            let h = (CFL * d / (c_eff + v_max))
+                .min(material_limit)
+                .min(dt - elapsed);
             v_max = self.substep(boundary, gravity, h, max_speed, &mut impulses);
             elapsed += h;
             substeps += 1;
         }
+        self.settle_unresolved(gravity, dt);
         self.update_stats(substeps);
         impulses
     }
 
+    /// Lets liquids separate where SPH can't resolve it: when a heavier
+    /// particle sits right above a lighter one of a different liquid (say
+    /// oil caught under water as single particles after a splash), the two
+    /// trade places at the rate a droplet that size would sink through the
+    /// other liquid: the lesser of its Stokes velocity Δρ g d² / 18μ and its
+    /// inertial terminal velocity √(g d Δρ/ρ).
+    ///
+    /// Without this, liquids stirred together at the particle scale stay
+    /// mixed forever: SPH particles settle into a lattice that resists the
+    /// tiny buoyancy force on a single particle. Trading identities (liquid
+    /// and salinity; velocities stay with positions) moves nothing, so it
+    /// doesn't disturb the pressure field, and mass is conserved.
+    fn settle_unresolved(&mut self, gravity: Vec2, dt: f32) {
+        let g = gravity.length();
+        let (heavy, light) = self.density_ratio_range();
+        if g == 0.0 || heavy / light < 1.0005 {
+            return;
+        }
+        let n = self.positions.len();
+        if self.scratch.fluid_neighbors.len() != n {
+            return;
+        }
+        let down = gravity / g;
+        let d = self.params.particle_spacing;
+        let density: Vec<f32> = (0..n)
+            .map(|i| self.liquid(i).density(self.salinity[i]))
+            .collect();
+        let viscosity: Vec<f32> = (0..n)
+            .map(|i| self.liquid(i).viscosity(self.salinity[i]))
+            .collect();
+        let mut taken = vec![false; n];
+        for i in 0..n {
+            if taken[i] {
+                continue;
+            }
+            let xi = self.positions[i];
+            // The lightest neighbor more or less straight below.
+            let mut best: Option<(usize, f32)> = None;
+            for &j in &self.scratch.fluid_neighbors[i] {
+                let j = j as usize;
+                if taken[j]
+                    || self.liquids[j] == self.liquids[i] && self.salinity[j] == self.salinity[i]
+                {
+                    continue;
+                }
+                let r = self.positions[j] - xi;
+                let along = r.dot(down);
+                let excess = density[i] - density[j];
+                if along > 0.7 * r.length() && excess > 0.0 && best.is_none_or(|(_, e)| excess > e)
+                {
+                    best = Some((j, excess));
+                }
+            }
+            let Some((j, excess)) = best else {
+                continue;
+            };
+            let mean = 0.5 * (density[i] + density[j]);
+            let stokes = excess * g * d * d / (18.0 * viscosity[i].max(viscosity[j]));
+            let inertial = (g * d * excess / mean).sqrt();
+            let chance = (stokes.min(inertial) * dt / d).min(1.0);
+            // A cheap hash of the particle and where it is, for a uniform
+            // number in [0, 1).
+            let bits = (i as u32).wrapping_mul(0x9E37_79B9)
+                ^ xi.x.to_bits()
+                ^ xi.y.to_bits().rotate_left(13);
+            let roll = (bits.wrapping_mul(0x85EB_CA6B) >> 8) as f32 / 16_777_216.0;
+            if roll < chance {
+                self.liquids.swap(i, j);
+                self.salinity.swap(i, j);
+                taken[i] = true;
+                taken[j] = true;
+            }
+        }
+    }
+
+    /// The densest and least dense liquid present, relative to fresh water.
+    fn density_ratio_range(&self) -> (f32, f32) {
+        let (mut heavy, mut light) = (0.0_f32, f32::INFINITY);
+        for i in 0..self.positions.len() {
+            let s = self.salinity.get(i).copied().unwrap_or(0.0);
+            let r = self.liquid(i).density(s) / materials::WATER_DENSITY;
+            heavy = heavy.max(r);
+            light = light.min(r);
+        }
+        if heavy == 0.0 {
+            (1.0, 1.0)
+        } else {
+            (heavy, light)
+        }
+    }
+
+    /// Which liquids are present, by [`Liquid::index`].
+    fn present_liquids(&self) -> [bool; 3] {
+        let mut present = [false; 3];
+        for &l in &self.liquids {
+            present[l.index()] = true;
+        }
+        if self.liquids.is_empty() && !self.positions.is_empty() {
+            present[0] = true;
+        }
+        present
+    }
+
+    /// Whether the liquids' real viscosity and surface tension can have a
+    /// visible effect at this resolution, and so are computed:
+    ///
+    /// - Viscosity, if the most viscous liquid present has a kinematic
+    ///   viscosity at least 1% of the artificial viscosity every particle
+    ///   already gets for stability (ν = α h c / 8 in 2D). Below that it's
+    ///   lost in the numerical viscosity.
+    /// - Surface tension, if the Bond number at the particle scale,
+    ///   Bo = ρ g h² / σ, is at most 1 for some liquid: only then is a
+    ///   single particle small enough for surface tension to beat its
+    ///   weight (water: particles under 2.7 mm, the capillary length).
+    ///   With coarser particles the pairwise cohesion forces that model
+    ///   surface tension are far stronger than the real effect at that
+    ///   scale and glue liquids in place (a 2 cm blob of oil at 4 mm
+    ///   spacing, Bond number 12, never rises), so they're left out.
+    ///
+    /// Water at the default 5 cm spacing needs neither.
+    pub fn effects(&self, gravity: Vec2) -> Effects {
+        let present = self.present_liquids();
+        let hs = 0.5 * self.params.support();
+        let nu_art = self.params.viscosity * hs * self.params.speed_of_sound / 8.0;
+        let g = gravity.length();
+        let mut out = Effects::default();
+        for l in Liquid::ALL.into_iter().filter(|l| present[l.index()]) {
+            let rho = l.density(0.0);
+            out.viscosity |= l.viscosity(0.0) / rho >= 0.01 * nu_art;
+            out.surface_tension |= rho * g * hs * hs / l.surface_tension() <= 1.0;
+        }
+        out
+    }
+
+    /// The largest substep the liquids present allow for viscosity
+    /// (Δt ≤ 0.125 h²ρ/μ) and surface tension (Δt ≤ 0.25 √(ρh³/2πσ),
+    /// Brackbill et al. 1992), with h the smoothing length. Usually far
+    /// above the CFL limit; it matters for thick oil and tiny particles.
+    fn material_dt_limit(&self) -> f32 {
+        let present = self.present_liquids();
+        let hs = 0.5 * self.params.support();
+        let mut limit = f32::INFINITY;
+        for l in Liquid::ALL.into_iter().filter(|l| present[l.index()]) {
+            let rho = l.density(0.0);
+            limit = limit.min(0.125 * hs * hs * rho / l.viscosity(0.4));
+            let sigma = l.surface_tension();
+            limit = limit.min(0.25 * (rho * hs * hs * hs / (std::f32::consts::TAU * sigma)).sqrt());
+        }
+        limit
+    }
+
     /// Compression statistics from the last substep's densities.
     fn update_stats(&mut self, substeps: u32) {
-        let rho0 = self.params.rest_density;
         let (mut max_c, mut sum_c, mut count) = (0.0_f32, 0.0_f32, 0_u32);
-        for &rho in &self.scratch.densities {
+        for (i, &rho) in self.scratch.densities.iter().enumerate() {
+            let rho0 = self.mass(i) / self.particle_volume();
             let compression = rho / rho0 - 1.0;
             if compression > 0.0 {
                 max_c = max_c.max(compression);
@@ -596,6 +909,8 @@ impl Fluid {
         order.sort_unstable_by_key(|&i| key(self.positions[i as usize]));
         self.positions = order.iter().map(|&i| self.positions[i as usize]).collect();
         self.velocities = order.iter().map(|&i| self.velocities[i as usize]).collect();
+        self.liquids = order.iter().map(|&i| self.liquids[i as usize]).collect();
+        self.salinity = order.iter().map(|&i| self.salinity[i as usize]).collect();
     }
 
     /// One substep. Three parallel passes over the particles, so threads
@@ -603,6 +918,14 @@ impl Fluid {
     /// and pressure together; (2) accelerations; (3) integration, which also
     /// finds the fastest particle for the next substep's size. Returns that
     /// speed.
+    ///
+    /// Several liquids: densities differ up to 13.5× (mercury and water),
+    /// which breaks the usual SPH density sum at interfaces (a water particle
+    /// next to mercury would count mercury's mass as its own density). So
+    /// this follows Solenthaler & Pajarola (2008): each particle sums the
+    /// *number density* δ = Σⱼ W, its density is its own mass times that,
+    /// ρ = m δ, and the pressure force is −Σⱼ (pᵢ/δᵢ² + pⱼ/δⱼ²) ∇W. With
+    /// one liquid this is exactly the standard formulation.
     fn substep(
         &mut self,
         boundary: &Boundary,
@@ -615,30 +938,56 @@ impl Fluid {
         let kernel = params.kernel();
         let h = params.support();
         let h2 = h * h;
-        let mass = params.particle_mass();
-        let rho0 = params.rest_density;
-        let stiffness = params.stiffness();
+        let m_ref = params.particle_mass();
+        let rho_ref = params.rest_density;
+        // Every particle's volume at rest, and the 2D slab thickness.
+        let v0 = m_ref / rho_ref;
+        let scale = rho_ref / materials::WATER_DENSITY;
         let c = params.speed_of_sound;
+        // Tait stiffness B = ρ₀ c² / γ, shared by every liquid at the
+        // heaviest one's ρ₀. With each liquid's own ρ₀, water under mercury
+        // is 13.5× too soft: a falling slab of mercury squashed it 25–30%
+        // and the rebound threw liquid out of the tank.
+        let stiff = rho_ref * self.density_ratio_range().0 * c * c / TAIT_GAMMA as f32;
         // Monaghan viscosity uses the smoothing length (half our support).
         let h_visc = 0.5 * h;
         let eps = 0.01 * h_visc * h_visc;
         let n = self.positions.len();
+        // Cohesion between liquids a and b: pair force k_ab s(r/h), with k
+        // scaled so each surface and interface has its real tension (see
+        // `kernel::cohesion_normalization` and `materials::work_of_adhesion`).
+        let cohesion = v0 * v0 / cohesion_normalization(h);
+        let mut k = [[0.0_f32; 3]; 3];
+        for a in Liquid::ALL {
+            for b in Liquid::ALL {
+                k[a.index()][b.index()] =
+                    0.5 * materials::work_of_adhesion(a, b) * scale * cohesion;
+            }
+        }
+        let salt_d = params.salt_diffusivity;
+        let water = Liquid::Water.index() as u8;
+        let effects = self.effects(gravity);
+        let (use_viscosity, use_cohesion) = (effects.viscosity, effects.surface_tension);
+        let use_salt = salt_d > 0.0 && self.salinity.iter().any(|&s| s > 0.0);
 
         let Scratch {
             densities,
             pressures,
             packed,
             accelerations,
+            salinity_rates,
             fluid_neighbors,
             boundary_neighbors,
             grid,
         } = &mut self.scratch;
         let positions = &self.positions;
         let velocities = &self.velocities;
+        let liquids = &self.liquids;
+        let salinity = &self.salinity;
 
-        // --- 1. Neighbors within the kernel support, density (the particle
-        // itself counts too), and pressure from the Tait equation, clamped at
-        // zero. All per particle, so one pass.
+        // --- 1. Neighbors within the kernel support, number density (the
+        // particle itself counts too), density, and Tait pressure, clamped
+        // at zero. All per particle, so one pass.
         grid.rebuild_fine(positions, h);
         let grid = &*grid;
         fluid_neighbors.resize_with(n, Vec::new);
@@ -646,7 +995,7 @@ impl Fluid {
         densities.resize(n, 0.0);
         pressures.resize(n, 0.0);
         packed.resize(n, Packed::default());
-        let self_weight = mass * kernel.w(0.0);
+        let self_weight = kernel.w(0.0);
         iter_mut!(fluid_neighbors)
             .zip(iter_mut!(boundary_neighbors))
             .zip(iter_mut!(densities))
@@ -657,78 +1006,116 @@ impl Fluid {
                 fluid.clear();
                 walls.clear();
                 let xi = positions[i];
-                let mut sum = self_weight;
+                let mut delta = self_weight;
                 grid.for_each_near(xi, |j, xj| {
                     let r2 = (xi - xj).length_squared();
                     if r2 < h2 && j != i {
                         fluid.push(j as u32);
-                        sum += mass * kernel.w(r2.sqrt());
+                        delta += kernel.w(r2.sqrt());
                     }
                 });
                 boundary.grid.for_each_near(xi, |b, xb| {
                     let r2 = (xi - xb).length_squared();
                     if r2 < h2 {
                         walls.push(b as u32);
-                        sum += boundary.psi[b] * kernel.w(r2.sqrt());
+                        // A boundary particle stands in for ψ/m_ref fluid
+                        // particles.
+                        delta += boundary.psi[b] / m_ref * kernel.w(r2.sqrt());
                     }
                 });
-                *rho = sum;
-                *p = (stiffness * ((sum / rho0).powi(TAIT_GAMMA) - 1.0)).max(0.0);
+                let (liquid, s) = (liquids[i], salinity[i]);
+                let props = scaled(liquid, s, scale);
+                let mass = m_ref * props.density_ratio;
+                *rho = mass * delta;
+                *p = (stiff * ((delta * v0).powi(TAIT_GAMMA) - 1.0)).max(0.0);
                 *packed = Packed {
                     x: xi,
                     v: velocities[i],
-                    rho: sum,
-                    term: *p / (sum * sum),
+                    rho: *rho,
+                    delta,
+                    term: *p / (delta * delta),
+                    mass,
+                    mu: props.mu,
+                    salinity: s,
+                    liquid: liquid.index() as u8,
                 };
             });
         let fluid_neighbors = &*fluid_neighbors;
         let boundary_neighbors = &*boundary_neighbors;
         let packed = &*packed;
 
-        // --- 2. Accelerations.
+        // --- 2. Accelerations: pressure, artificial viscosity (for
+        // stability), each liquid's real viscosity (Morris et al. 1997),
+        // cohesion (surface and interfacial tension), and gravity. Also the
+        // diffusion of salt between water particles.
         accelerations.resize(n, Vec2::ZERO);
-        iter_mut!(accelerations).enumerate().for_each(|(i, acc)| {
-            let Packed {
-                x: xi,
-                v: vi,
-                rho: rho_i,
-                term: pi_term,
-            } = packed[i];
-            let mut a = gravity;
+        salinity_rates.resize(n, 0.0);
+        iter_mut!(accelerations)
+            .zip(iter_mut!(salinity_rates))
+            .enumerate()
+            .for_each(|(i, (acc, ds))| {
+                let pi = packed[i];
+                let inv_m = 1.0 / pi.mass;
+                let li = pi.liquid as usize;
+                let mut a = gravity;
+                let mut salt = 0.0;
 
-            for &j in &fluid_neighbors[i] {
-                let pj = packed[j as usize];
-                let r = xi - pj.x;
-                let dist = r.length();
-                let grad = kernel.grad(r, dist);
-                // Symmetric pressure force: conserves momentum exactly.
-                a -= mass * (pi_term + pj.term) * grad;
-                // Monaghan artificial viscosity, only while approaching.
-                let vr = (vi - pj.v).dot(r);
-                if vr < 0.0 {
-                    let nu = 2.0 * params.viscosity * h_visc * c / (rho_i + pj.rho);
-                    let pi_visc = -nu * vr / (dist * dist + eps);
-                    a -= mass * pi_visc * grad;
+                for &j in &fluid_neighbors[i] {
+                    let pj = packed[j as usize];
+                    let r = pi.x - pj.x;
+                    let dist = r.length();
+                    let grad = kernel.grad(r, dist);
+                    let r2e = dist * dist + eps;
+                    // Pressure: antisymmetric, so momentum is conserved.
+                    a -= inv_m * (pi.term + pj.term) * grad;
+                    let v_ij = pi.v - pj.v;
+                    let vr = v_ij.dot(r);
+                    // Monaghan artificial viscosity, only while approaching.
+                    if vr < 0.0 {
+                        let nu = 2.0 * params.viscosity * h_visc * c / (pi.rho + pj.rho);
+                        a -= pj.mass * (-nu * vr / r2e) * grad;
+                    }
+                    let rg = r.dot(grad);
+                    // Physical viscosity: r·∇W < 0, so this pulls velocities
+                    // together.
+                    if use_viscosity {
+                        a += inv_m * (pi.mu + pj.mu) * rg / (pi.delta * pj.delta * r2e) * v_ij;
+                    }
+                    // Cohesion: toward j where s > 0.
+                    if use_cohesion && dist > 1e-9 {
+                        let f = k[li][pj.liquid as usize] * cohesion_shape(dist / h);
+                        a -= inv_m * f / dist * r;
+                    }
+                    if use_salt && pi.liquid == water && pj.liquid == water {
+                        salt += 2.0 * salt_d * v0 * (pi.salinity - pj.salinity) * rg / r2e;
+                    }
                 }
-            }
 
-            for &b in &boundary_neighbors[i] {
-                let b = b as usize;
-                let r = xi - boundary.positions[b];
-                let dist = r.length();
-                let grad = kernel.grad(r, dist);
-                // Akinci boundary pressure: the boundary "mirrors" this
-                // particle's own pressure.
-                a -= boundary.psi[b] * pi_term * grad;
-                let vr = (vi - boundary.velocities[b]).dot(r);
-                if vr < 0.0 {
-                    let nu = params.wall_viscosity * h_visc * c / rho_i;
-                    let pi_visc = -nu * vr / (dist * dist + eps);
-                    a -= boundary.psi[b] * pi_visc * grad;
+                for &b in &boundary_neighbors[i] {
+                    let b = b as usize;
+                    let r = pi.x - boundary.positions[b];
+                    let dist = r.length();
+                    let grad = kernel.grad(r, dist);
+                    let r2e = dist * dist + eps;
+                    let w = boundary.psi[b] / m_ref;
+                    // Akinci boundary pressure: the boundary "mirrors" this
+                    // particle's own pressure.
+                    a -= w * inv_m * pi.term * grad;
+                    let v_ib = pi.v - boundary.velocities[b];
+                    let vr = v_ib.dot(r);
+                    if vr < 0.0 {
+                        let nu = params.wall_viscosity * h_visc * c / pi.rho;
+                        a -= w * pi.mass * (-nu * vr / r2e) * grad;
+                    }
+                    // No-slip physical viscosity against the wall.
+                    if use_viscosity {
+                        a += w * inv_m * 2.0 * pi.mu * r.dot(grad) / (pi.delta * pi.delta * r2e)
+                            * v_ib;
+                    }
                 }
-            }
-            *acc = a;
-        });
+                *acc = a;
+                *ds = salt;
+            });
 
         // --- 2b. Reaction on bodies: for every fluid-boundary pair, the
         // body gets exactly the opposite of the force the fluid particle got
@@ -739,24 +1126,25 @@ impl Fluid {
                 if list.is_empty() {
                     continue;
                 }
-                let Packed {
-                    x: xi,
-                    v: vi,
-                    rho: rho_i,
-                    term: pi_term,
-                } = packed[i];
+                let pi = packed[i];
                 for &b in list {
                     let b = b as usize;
                     let xb = boundary.positions[b];
-                    let r = xi - xb;
+                    let r = pi.x - xb;
                     let dist = r.length();
-                    let mut coefficient = pi_term;
-                    let vr = (vi - boundary.velocities[b]).dot(r);
+                    let grad = kernel.grad(r, dist);
+                    let r2e = dist * dist + eps;
+                    let w = boundary.psi[b] / m_ref;
+                    let v_ib = pi.v - boundary.velocities[b];
+                    let vr = v_ib.dot(r);
+                    let mut force = w * pi.term * grad;
                     if vr < 0.0 {
-                        let nu = params.wall_viscosity * h_visc * c / rho_i;
-                        coefficient += -nu * vr / (dist * dist + eps);
+                        let nu = params.wall_viscosity * h_visc * c / pi.rho;
+                        force += w * pi.mass * pi.mass * (-nu * vr / r2e) * grad;
                     }
-                    let force = mass * boundary.psi[b] * coefficient * kernel.grad(r, dist);
+                    if use_viscosity {
+                        force -= w * 2.0 * pi.mu * r.dot(grad) / (pi.delta * pi.delta * r2e) * v_ib;
+                    }
                     let body = boundary.body[b] as usize;
                     if let Some(impulse) = impulses.get_mut(body) {
                         impulse.linear += force * dt;
@@ -768,6 +1156,12 @@ impl Fluid {
 
         // --- 3. Integrate (semi-implicit Euler), noting the top speed.
         let accelerations = &self.scratch.accelerations;
+        let salinity_rates = &self.scratch.salinity_rates;
+        if use_salt {
+            iter_mut!(self.salinity)
+                .zip(iter!(salinity_rates))
+                .for_each(|(s, ds)| *s = (*s + ds * dt).max(0.0));
+        }
         let top = max_reduce(
             iter_mut!(self.velocities)
                 .zip(iter_mut!(self.positions))
@@ -823,17 +1217,29 @@ impl Fluid {
 
     /// Total kinetic energy of the fluid, J.
     pub fn kinetic_energy(&self) -> f32 {
-        let m = self.params.particle_mass();
         self.velocities
             .iter()
-            .map(|v| 0.5 * m * v.length_squared())
+            .enumerate()
+            .map(|(i, v)| 0.5 * self.mass(i) * v.length_squared())
             .sum()
     }
 
     /// Total momentum of the fluid, kg·m/s.
     pub fn momentum(&self) -> Vec2 {
-        let m = self.params.particle_mass();
-        self.velocities.iter().map(|&v| m * v).sum()
+        self.velocities
+            .iter()
+            .enumerate()
+            .map(|(i, &v)| self.mass(i) * v)
+            .sum()
+    }
+
+    /// Total mass of each liquid, kg, indexed by [`Liquid::index`].
+    pub fn mass_by_liquid(&self) -> [f32; 3] {
+        let mut out = [0.0; 3];
+        for i in 0..self.len() {
+            out[self.liquid(i).index()] += self.mass(i);
+        }
+        out
     }
 }
 

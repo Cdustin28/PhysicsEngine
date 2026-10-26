@@ -17,6 +17,7 @@ pub const ALL: &[Preset] = &[
     ("bounce", bounce),
     ("dam_break", dam_break),
     ("buoyancy", buoyancy),
+    ("liquids", liquids),
     ("pendulums", pendulums),
     ("rope_bridge", rope_bridge),
     ("newtons_cradle", newtons_cradle),
@@ -151,6 +152,40 @@ pub fn buoyancy() -> World {
     ball.density = 3.0;
     w.fluid.remove_disc(ball.position, 0.25);
     w.add_body(ball);
+    w
+}
+
+/// Four liquids poured in the wrong order: a column of oil under salt
+/// water under fresh water, with a slab of mercury laid on top.
+/// They sort themselves by density: mercury to the bottom, then salt water,
+/// fresh water, and oil on top.
+pub fn liquids() -> World {
+    use crate::fluid::{Liquid, SEAWATER_SALINITY};
+    let mut w = tank(3.0, 3.0);
+    let b = w.bodies.clone();
+    let f = &mut w.fluid;
+    f.fill_rect_with(
+        Vec2::new(-1.5, 0.0),
+        Vec2::new(1.5, 0.5),
+        &b,
+        Liquid::Oil,
+        0.0,
+    );
+    f.fill_rect_with(
+        Vec2::new(-1.5, 0.5),
+        Vec2::new(1.5, 1.0),
+        &b,
+        Liquid::Water,
+        SEAWATER_SALINITY,
+    );
+    f.fill_rect(Vec2::new(-1.5, 1.0), Vec2::new(1.5, 1.5), &b);
+    f.fill_rect_with(
+        Vec2::new(-0.5, 1.5),
+        Vec2::new(0.5, 1.7),
+        &b,
+        Liquid::Mercury,
+        0.0,
+    );
     w
 }
 

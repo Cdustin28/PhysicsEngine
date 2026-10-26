@@ -226,6 +226,7 @@ struct Persisted {
     camera: Camera,
     new_body: NewBodySettings,
     fluid_shape: FluidShape,
+    liquid: crate::liquid_ui::LiquidChoice,
     brush_radius: f32,
     color_by: ColorBy,
     show_contacts: bool,
@@ -251,6 +252,7 @@ impl Default for Persisted {
             camera: Camera::default(),
             new_body: NewBodySettings::default(),
             fluid_shape: FluidShape::Rectangle,
+            liquid: Default::default(),
             brush_radius: 0.3,
             color_by: ColorBy::Speed,
             show_contacts: false,
@@ -289,6 +291,8 @@ pub struct EditorApp {
     snap: bool,
     show_contacts: bool,
     fluid_shape: FluidShape,
+    /// Which liquid the Fluid tool places.
+    liquid: crate::liquid_ui::LiquidChoice,
     /// Radius of the fluid brush and the eraser, m.
     brush_radius: f32,
     /// Where a rectangle fill drag started.
@@ -454,6 +458,7 @@ impl EditorApp {
             snap: p.snap,
             show_contacts: p.show_contacts,
             fluid_shape: p.fluid_shape,
+            liquid: p.liquid,
             brush_radius: p.brush_radius,
             fluid_rect_start: None,
             color_by: p.color_by,
@@ -490,6 +495,7 @@ impl EditorApp {
             camera: self.camera,
             new_body: self.new_body.clone(),
             fluid_shape: self.fluid_shape,
+            liquid: self.liquid,
             brush_radius: self.brush_radius,
             color_by: self.color_by,
             show_contacts: self.show_contacts,

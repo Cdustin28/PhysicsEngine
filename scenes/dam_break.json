@@ -52,8 +52,9 @@
         "particle_spacing": 0.05,
         "rest_density": 10.0,
         "speed_of_sound": 20.0,
-        "viscosity": 0.05,
-        "wall_viscosity": 0.5
+        "viscosity": 0.01,
+        "wall_viscosity": 0.5,
+        "salt_diffusivity": 1.5e-9
       },
       "positions": [
         [-2.9750001, 0.025],
