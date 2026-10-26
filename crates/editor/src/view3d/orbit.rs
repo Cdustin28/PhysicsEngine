@@ -81,6 +81,18 @@ impl OrbitCamera {
         2.0 * depth * (FOV_Y * 0.5).tan() / rect.height().max(1.0)
     }
 
+    /// World → view space.
+    pub fn view(&self) -> Mat4 {
+        camera::rh::view::look_at_mat4(self.eye(), self.target, Vec3::Y)
+    }
+
+    /// View → clip space for a viewport of the given size.
+    pub fn proj(&self, rect: Rect) -> Mat4 {
+        let aspect = (rect.width() / rect.height().max(1.0)).max(1e-3);
+        let (near, far) = self.clip();
+        camera::rh::proj::directx::perspective(FOV_Y, aspect, near, far)
+    }
+
     /// World → clip space for a viewport of the given size.
     pub fn view_proj(&self, rect: Rect) -> Mat4 {
         let aspect = (rect.width() / rect.height().max(1.0)).max(1e-3);

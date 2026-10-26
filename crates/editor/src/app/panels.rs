@@ -575,6 +575,8 @@ impl EditorApp {
                     });
                     ui.end_row();
                 });
+                ui.checkbox(&mut self.smooth_liquid, "Smooth surfaces")
+                    .on_hover_text("Draw the liquid as one smooth body instead of dots");
                 match &gpu_name {
                     Some(name) => {
                         ui.checkbox(&mut self.use_gpu, "Simulate on the GPU")

@@ -3,7 +3,7 @@
 use super::{
     CARDINAL, CONTACT_COLOR, ColorBy, Drag, EditorApp, FluidShape, GOLD, Grab, HANDLE_RADIUS_PX,
     MAX_THROW_SPEED, MIN_HALF_SIZE, PRESSURE_COLOR_DEPTH, ROTATE_HANDLE_OFFSET_PX,
-    SPEED_COLOR_SCALE, Tool, WATER_DEEP, WATER_LIGHT,
+    SPEED_COLOR_SCALE, Tool, WATER_DEEP, WATER_LIGHT, smooth,
 };
 use crate::particles::{Instance, ParticleCallback, color_bytes};
 use eframe::egui::{self, Color32, PointerButton, Pos2, Rect, Sense, Stroke, Ui};
@@ -453,7 +453,7 @@ impl EditorApp {
     // ---------------------------------------------------------------------
     // Drawing
 
-    fn draw_fluid(&self, painter: &egui::Painter, viewport: Rect) {
+    fn draw_fluid(&mut self, painter: &egui::Painter, viewport: Rect) {
         let fluid = &self.world.fluid;
         if fluid.is_empty() {
             return;
@@ -479,6 +479,37 @@ impl EditorApp {
             };
             crate::liquid_ui::particle_color(fluid.liquid(i), salinity, t, WATER_DEEP, WATER_LIGHT)
         };
+
+        if self.smooth_liquid {
+            let colors: Vec<Color32> = (0..fluid.len()).map(color).collect();
+            let Some(smooth) =
+                smooth::rasterize(&fluid.positions, &colors, fluid.params.particle_spacing)
+            else {
+                return;
+            };
+            let size = smooth.image.size;
+            let options = egui::TextureOptions::LINEAR;
+            let texture = match &mut self.fluid_texture {
+                Some(t) if t.size() == size => {
+                    t.set(smooth.image, options);
+                    t.clone()
+                }
+                slot => {
+                    let t = painter.ctx().load_texture("liquid", smooth.image, options);
+                    *slot = Some(t.clone());
+                    t
+                }
+            };
+            let a = self.camera.world_to_screen(viewport, smooth.min);
+            let b = self.camera.world_to_screen(viewport, smooth.max);
+            painter.image(
+                texture.id(),
+                Rect::from_two_pos(a, b),
+                Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                Color32::WHITE,
+            );
+            return;
+        }
 
         if self.gpu_render {
             // One instanced draw call on the GPU (see particles.rs).

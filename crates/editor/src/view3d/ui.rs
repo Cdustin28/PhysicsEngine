@@ -199,6 +199,8 @@ impl Editor3d {
             &mut self.new_body.color_by_temperature,
             "Color by temperature",
         );
+        ui.checkbox(&mut self.new_body.smooth_liquid, "Smooth surfaces")
+            .on_hover_text("Draw liquid as one smooth, see-through surface instead of balls");
         let fluid = &mut self.world.fluid;
         egui::Grid::new("fluid3d").num_columns(2).show(ui, |ui| {
             ui.label("Particles");
@@ -702,7 +704,7 @@ impl Editor3d {
                 .to_array(),
             })
             .collect();
-        BodyCallback::new(
+        let mut callback = BodyCallback::new(
             cubes,
             spheres,
             particles,
@@ -715,7 +717,34 @@ impl Editor3d {
                 up,
             },
         )
-        .with_glowing_splats(dark)
+        .with_glowing_splats(dark);
+        if self.new_body.smooth_liquid && !self.world.fluid.is_empty() {
+            callback = callback.with_surface(self.surface_frame(rect, dark));
+        }
+        callback
+    }
+
+    /// The liquid as a smooth surface: one sphere per particle, a little
+    /// bigger than the spacing so neighbors overlap.
+    fn surface_frame(&self, rect: Rect, dark: bool) -> super::render::SurfaceFrame {
+        let fluid = &self.world.fluid;
+        let radius = 0.9 * fluid.params.particle_spacing;
+        let sky = crate::theme::sky(dark);
+        super::render::SurfaceFrame {
+            particles: super::surface::particles(fluid, radius),
+            view: super::surface::SurfaceView {
+                view: self.camera.view(),
+                proj: self.camera.proj(rect),
+                sky: [
+                    f32::from(sky.r()) / 255.0,
+                    f32::from(sky.g()) / 255.0,
+                    f32::from(sky.b()) / 255.0,
+                ],
+                light: Vec3::new(0.45, 0.8, 0.35),
+                radius,
+            },
+            rect,
+        }
     }
 
     fn draw_contacts(&self, painter: &egui::Painter, rect: Rect) {
