@@ -373,8 +373,12 @@ Not yet: undo in the Orbits tab, saving systems as files (they're kept between s
 | Layered hydrostatics (2D) | dp/dy within 15% of ρg in water, 20% in mercury (WCSPH pressure noise) |
 | Momentum, oil blob hitting mercury blob | conserved to 10⁻⁴ |
 | Salt diffusion | total salt conserved to 10⁻³; spreads across the interface |
+| Oil–water emulsion (checkerboard) | separates: oil's mean height ends > 0.25 m above water's in 6 s |
 
-Known limit: SPH particles settle into a lattice that resists very slow flows. A blob of oil only one or two particles across stays where it is, and a perfectly flat layer of oil under water waits for a disturbance before it overturns (any perturbation is enough, as in reality). A blob several particles across rises, though more slowly than a real one. An implicit incompressible solver (DFSPH) was tried and didn't fix this; it's parked.
+- [x] **Sub-resolution settling:** SPH particles settle into a lattice that resists the tiny buoyancy force on a single particle, so liquids stirred together particle by particle (oil caught under water after a splash) stayed mixed forever. Now a heavier particle right above a lighter one of a different liquid trades places with it at the rate a droplet that size would sink: the lesser of its Stokes velocity Δρ g d²/18μ and its inertial terminal velocity √(g d Δρ/ρ). Trading identities moves nothing, so pressure isn't disturbed and mass is conserved. The Liquids example (four liquids in the wrong order) sorts to within 0.02 m of the ideal layer heights.
+- [x] All liquids share the heaviest one's Tait stiffness (and the CFL step uses the faster sound speed that gives the lighter ones): with each liquid's own, water under a slab of mercury compressed 25–30% and the rebound threw liquid out of the tank.
+
+Known limit: buoyant blobs that are resolved (several particles across) rise more slowly than real ones; a perfectly flat oil layer under water waits for a disturbance before it overturns, as it would in reality. An implicit incompressible solver (DFSPH) was tried and didn't help; it's parked.
 
 ## Later
 

@@ -90,8 +90,8 @@ pub fn liquids() -> World {
     );
     f.fill_box(Vec3::new(-x, 0.6, -z), Vec3::new(x, 0.9, z), &b);
     f.fill_box_with(
-        Vec3::new(-0.4, 1.2, -0.3),
-        Vec3::new(0.4, 1.35, 0.3),
+        Vec3::new(-0.4, 0.9, -0.3),
+        Vec3::new(0.4, 1.0, 0.3),
         &b,
         Liquid::Mercury,
         0.0,

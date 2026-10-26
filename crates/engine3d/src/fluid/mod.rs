@@ -732,6 +732,10 @@ impl Fluid {
         let c = self.params.speed_of_sound;
         let d = self.params.particle_spacing;
         let max_speed = MAX_SPEED_FRACTION * c;
+        // Every liquid shares the heaviest one's stiffness (see
+        // `stiffness_ratio`), so the lighter ones carry sound faster.
+        let (heavy, light) = self.density_ratio_range();
+        let c_eff = c * (heavy / light).sqrt();
 
         let mut elapsed = 0.0;
         let mut substeps = 0;
@@ -740,15 +744,107 @@ impl Fluid {
         // The 1e-6 guard stops a sliver of round-off from costing a whole
         // extra substep.
         while dt - elapsed > 1e-6 {
-            let h = (CFL * d / (c + v_max))
+            let h = (CFL * d / (c_eff + v_max))
                 .min(material_limit)
                 .min(dt - elapsed);
             v_max = self.substep(boundary, gravity, h, max_speed, &mut impulses);
             elapsed += h;
             substeps += 1;
         }
+        self.settle_unresolved(gravity, dt);
         self.update_stats(substeps);
         impulses
+    }
+
+    /// Lets liquids separate where SPH can't resolve it: when a heavier
+    /// particle sits right above a lighter one of a different liquid (say
+    /// oil caught under water as single particles after a splash), the two
+    /// trade places at the rate a droplet that size would sink through the
+    /// other liquid: the lesser of its Stokes velocity Δρ g d² / 18μ and its
+    /// inertial terminal velocity √(g d Δρ/ρ).
+    ///
+    /// Without this, liquids stirred together at the particle scale stay
+    /// mixed forever: SPH particles settle into a lattice that resists the
+    /// tiny buoyancy force on a single particle. Trading identities (liquid
+    /// and salinity; velocities stay with positions) moves nothing, so it
+    /// doesn't disturb the pressure field, and mass is conserved.
+    fn settle_unresolved(&mut self, gravity: Vec3, dt: f32) {
+        let g = gravity.length();
+        let (heavy, light) = self.density_ratio_range();
+        if g == 0.0 || heavy / light < 1.0005 {
+            return;
+        }
+        let n = self.positions.len();
+        if self.scratch.fluid_neighbors.len() != n {
+            return;
+        }
+        let down = gravity / g;
+        let d = self.params.particle_spacing;
+        let density: Vec<f32> = (0..n)
+            .map(|i| self.liquid(i).density(self.salinity[i]))
+            .collect();
+        let viscosity: Vec<f32> = (0..n)
+            .map(|i| self.liquid(i).viscosity(self.salinity[i]))
+            .collect();
+        let mut taken = vec![false; n];
+        for i in 0..n {
+            if taken[i] {
+                continue;
+            }
+            let xi = self.positions[i];
+            // The lightest neighbor more or less straight below.
+            let mut best: Option<(usize, f32)> = None;
+            for &j in &self.scratch.fluid_neighbors[i] {
+                let j = j as usize;
+                if taken[j]
+                    || self.liquids[j] == self.liquids[i] && self.salinity[j] == self.salinity[i]
+                {
+                    continue;
+                }
+                let r = self.positions[j] - xi;
+                let along = r.dot(down);
+                let excess = density[i] - density[j];
+                if along > 0.7 * r.length() && excess > 0.0 && best.is_none_or(|(_, e)| excess > e)
+                {
+                    best = Some((j, excess));
+                }
+            }
+            let Some((j, excess)) = best else {
+                continue;
+            };
+            let mean = 0.5 * (density[i] + density[j]);
+            let stokes = excess * g * d * d / (18.0 * viscosity[i].max(viscosity[j]));
+            let inertial = (g * d * excess / mean).sqrt();
+            let chance = (stokes.min(inertial) * dt / d).min(1.0);
+            // A cheap hash of the particle and where it is, for a uniform
+            // number in [0, 1).
+            let bits = (i as u32).wrapping_mul(0x9E37_79B9)
+                ^ xi.x.to_bits()
+                ^ xi.y.to_bits().rotate_left(13);
+            let roll = (bits.wrapping_mul(0x85EB_CA6B) >> 8) as f32 / 16_777_216.0;
+            if roll < chance {
+                self.liquids.swap(i, j);
+                self.salinity.swap(i, j);
+                taken[i] = true;
+                taken[j] = true;
+            }
+        }
+    }
+
+    /// The densest and least dense liquid present, relative to fresh water.
+    fn density_ratio_range(&self) -> (f32, f32) {
+        let (mut heavy, mut light) = (0.0_f32, f32::INFINITY);
+        for i in 0..self.positions.len() {
+            let s = self.salinity.get(i).copied().unwrap_or(0.0);
+            let r = self.liquid(i).density(s) / materials::WATER_DENSITY;
+            heavy = heavy.max(r);
+            light = light.min(r);
+        }
+        if heavy == 0.0 {
+            (1.0, 1.0)
+        } else {
+            (heavy, light)
+        }
     }
 
     /// Which liquids are present, by [`Liquid::index`].
@@ -881,7 +977,11 @@ impl Fluid {
         let v0 = m_ref / rho_ref;
         let scale = rho_ref / materials::WATER_DENSITY;
         let c = params.speed_of_sound;
-        let tait = c * c / TAIT_GAMMA as f32;
+        // Tait stiffness B = ρ₀ c² / γ, shared by every liquid at the
+        // heaviest one's ρ₀. With each liquid's own ρ₀, water under mercury
+        // is 13.5× too soft: a falling slab of mercury squashed it 25–30%
+        // and the rebound threw liquid out of the tank.
+        let stiff = rho_ref * self.density_ratio_range().0 * c * c / TAIT_GAMMA as f32;
         // Monaghan viscosity uses the smoothing length (half our support).
         let h_visc = 0.5 * h;
         let eps = 0.01 * h_visc * h_visc;
@@ -959,9 +1059,8 @@ impl Fluid {
                 let (liquid, s) = (liquids[i], salinity[i]);
                 let props = scaled(liquid, s, scale);
                 let mass = m_ref * props.density_ratio;
-                let rho0 = rho_ref * props.density_ratio;
                 *rho = mass * delta;
-                *p = (rho0 * tait * ((delta * v0).powi(TAIT_GAMMA) - 1.0)).max(0.0);
+                *p = (stiff * ((delta * v0).powi(TAIT_GAMMA) - 1.0)).max(0.0);
                 *packed = Packed {
                     x: xi,
                     v: velocities[i],

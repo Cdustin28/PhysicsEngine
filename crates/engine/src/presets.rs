@@ -156,7 +156,7 @@ pub fn buoyancy() -> World {
 }
 
 /// Four liquids poured in the wrong order: a column of oil under salt
-/// water under fresh water, with a slab of mercury dropped in from above.
+/// water under fresh water, with a slab of mercury laid on top.
 /// They sort themselves by density: mercury to the bottom, then salt water,
 /// fresh water, and oil on top.
 pub fn liquids() -> World {
@@ -180,8 +180,8 @@ pub fn liquids() -> World {
     );
     f.fill_rect(Vec2::new(-1.5, 1.0), Vec2::new(1.5, 1.5), &b);
     f.fill_rect_with(
-        Vec2::new(-0.6, 2.0),
-        Vec2::new(0.6, 2.3),
+        Vec2::new(-0.5, 1.5),
+        Vec2::new(0.5, 1.7),
         &b,
         Liquid::Mercury,
         0.0,

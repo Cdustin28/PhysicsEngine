@@ -231,3 +231,24 @@ fn cpu_solver_steps_mixed_liquids_through_the_trait() {
     let impulses = CpuSolver.step(&mut w.fluid, &boundary, w.gravity, DT, n);
     assert_eq!(impulses.len(), n);
 }
+
+#[test]
+fn an_emulsion_separates() {
+    // Oil and water mixed particle by particle (a checkerboard): SPH alone
+    // can't separate single particles, so this exercises the sub-resolution
+    // settling that trades places at a droplet's sinking speed.
+    let mut w = presets::tank(1.0, 2.0);
+    let b = w.bodies.clone();
+    w.fluid.fill_rect(Vec2::new(-0.5, 0.0), Vec2::new(0.5, 0.8), &b);
+    let d = w.fluid.params.particle_spacing;
+    for i in 0..w.fluid.len() {
+        let p = w.fluid.positions[i] / d;
+        if (p.x.floor() as i32 + p.y.floor() as i32) % 2 == 0 {
+            w.fluid.liquids[i] = Liquid::Oil;
+        }
+    }
+    run(&mut w, 6.0);
+    let (oil, water) = (mean_height(&w, Liquid::Oil), mean_height(&w, Liquid::Water));
+    // Fully separated: oil's mean 0.6 m, water's 0.2 m.
+    assert!(oil - water > 0.25, "oil {oil}, water {water}");
+}
