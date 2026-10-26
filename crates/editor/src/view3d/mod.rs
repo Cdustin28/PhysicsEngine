@@ -11,6 +11,7 @@ mod joints;
 pub(crate) mod orbit;
 pub mod render;
 mod soft;
+pub mod surface;
 mod ui;
 
 use crate::history::History;
@@ -59,6 +60,8 @@ struct NewBody {
     liquid_celsius: f32,
     /// Color liquid by temperature instead of speed.
     color_by_temperature: bool,
+    /// Draw liquid as smooth surfaces instead of balls.
+    smooth_liquid: bool,
 }
 
 impl Default for NewBody {
@@ -72,6 +75,7 @@ impl Default for NewBody {
             liquid: Default::default(),
             liquid_celsius: 20.0,
             color_by_temperature: false,
+            smooth_liquid: false,
         }
     }
 }

@@ -13,6 +13,7 @@ mod gas;
 mod io;
 mod joints;
 mod panels;
+mod smooth;
 mod soft;
 
 pub(crate) use panels::title_case;
@@ -231,6 +232,7 @@ struct Persisted {
     liquid_celsius: f32,
     brush_radius: f32,
     color_by: ColorBy,
+    smooth_liquid: bool,
     show_contacts: bool,
     show_fluid_forces: bool,
     snap: bool,
@@ -258,6 +260,7 @@ impl Default for Persisted {
             liquid_celsius: 20.0,
             brush_radius: 0.3,
             color_by: ColorBy::Speed,
+            smooth_liquid: false,
             show_contacts: false,
             show_fluid_forces: true,
             snap: false,
@@ -303,6 +306,10 @@ pub struct EditorApp {
     /// Where a rectangle fill drag started.
     fluid_rect_start: Option<Vec2>,
     color_by: ColorBy,
+    /// Draw the liquid as one smooth body instead of dots.
+    smooth_liquid: bool,
+    /// The smooth liquid's image, updated every frame.
+    fluid_texture: Option<egui::TextureHandle>,
     show_fluid_forces: bool,
     joint_settings: joints::JointSettings,
     /// Body and point where a rod/rope/spring drag started.
@@ -468,6 +475,8 @@ impl EditorApp {
             brush_radius: p.brush_radius,
             fluid_rect_start: None,
             color_by: p.color_by,
+            smooth_liquid: p.smooth_liquid,
+            fluid_texture: None,
             show_fluid_forces: p.show_fluid_forces,
             joint_settings: p.joint_settings.clone(),
             joint_drag: None,
@@ -505,6 +514,7 @@ impl EditorApp {
             liquid_celsius: self.liquid_celsius,
             brush_radius: self.brush_radius,
             color_by: self.color_by,
+            smooth_liquid: self.smooth_liquid,
             show_contacts: self.show_contacts,
             show_fluid_forces: self.show_fluid_forces,
             snap: self.snap,

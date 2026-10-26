@@ -249,6 +249,10 @@ struct Mesh {
 
 pub struct BodyRenderer {
     pipeline: wgpu::RenderPipeline,
+    /// The same, for the offscreen scene pass of the smooth-liquid view.
+    scene_pipeline: wgpu::RenderPipeline,
+    /// Smooth liquid surfaces, if this GPU can render them.
+    surface: Option<super::surface::SurfaceRenderer>,
     splat_pipeline: wgpu::RenderPipeline,
     glow_pipeline: wgpu::RenderPipeline,
     /// This frame's splats lighten (screen) instead of darken.
@@ -282,7 +286,13 @@ impl BodyRenderer {
         let Some(rs) = cc.wgpu_render_state.as_ref() else {
             return false;
         };
-        let renderer = Self::new(&rs.device, rs.target_format);
+        let mut renderer = Self::new(&rs.device, rs.target_format);
+        if super::surface::SurfaceRenderer::supported(&rs.adapter) {
+            renderer.surface = Some(super::surface::SurfaceRenderer::new(
+                &rs.device,
+                rs.target_format,
+            ));
+        }
         rs.renderer.write().callback_resources.insert(renderer);
         true
     }
@@ -310,51 +320,55 @@ impl BodyRenderer {
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("bodies3d"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &module,
-                entry_point: Some("vs_main"),
-                compilation_options: Default::default(),
-                buffers: &[
-                    Some(wgpu::VertexBufferLayout {
-                        array_stride: std::mem::size_of::<Vertex>() as u64,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3],
-                    }),
-                    Some(wgpu::VertexBufferLayout {
-                        array_stride: std::mem::size_of::<Instance>() as u64,
-                        step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &wgpu::vertex_attr_array![
-                            2 => Float32x3, 3 => Float32, 4 => Float32x3, 5 => Float32,
-                            6 => Float32x4, 7 => Unorm8x4
-                        ],
-                    }),
-                ],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &module,
-                entry_point: Some("fs_main"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: DEPTH_FORMAT,
-                depth_write_enabled: Some(true),
-                depth_compare: Some(wgpu::CompareFunction::Less),
-                stencil: Default::default(),
-                bias: Default::default(),
-            }),
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        });
+        let body_pipeline = |depth_format: wgpu::TextureFormat| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("bodies3d"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some("vs_main"),
+                    compilation_options: Default::default(),
+                    buffers: &[
+                        Some(wgpu::VertexBufferLayout {
+                            array_stride: std::mem::size_of::<Vertex>() as u64,
+                            step_mode: wgpu::VertexStepMode::Vertex,
+                            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3],
+                        }),
+                        Some(wgpu::VertexBufferLayout {
+                            array_stride: std::mem::size_of::<Instance>() as u64,
+                            step_mode: wgpu::VertexStepMode::Instance,
+                            attributes: &wgpu::vertex_attr_array![
+                                2 => Float32x3, 3 => Float32, 4 => Float32x3, 5 => Float32,
+                                6 => Float32x4, 7 => Unorm8x4
+                            ],
+                        }),
+                    ],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some("fs_main"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: depth_format,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::Less),
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let pipeline = body_pipeline(DEPTH_FORMAT);
+        let scene_pipeline = body_pipeline(wgpu::TextureFormat::Depth32Float);
         let splat_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("splats3d"),
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(SPLAT_SHADER)),
@@ -439,6 +453,8 @@ impl BodyRenderer {
         let capacity = 256;
         Self {
             pipeline,
+            scene_pipeline,
+            surface: None,
             splat_pipeline,
             glow_pipeline,
             glow: false,
@@ -590,6 +606,16 @@ pub struct BodyCallback {
     /// Splats lighten instead of darken (for dark backgrounds).
     glow: bool,
     globals: Globals,
+    /// Draw the particles as a smooth liquid surface instead of balls.
+    surface: Option<SurfaceFrame>,
+}
+
+/// What the smooth-surface passes need for one frame.
+pub struct SurfaceFrame {
+    pub particles: Vec<super::surface::SurfaceParticle>,
+    pub view: super::surface::SurfaceView,
+    /// The canvas, in points.
+    pub rect: Rect,
 }
 
 impl BodyCallback {
@@ -622,6 +648,7 @@ impl BodyCallback {
             soft,
             splats,
             glow: false,
+            surface: None,
             globals: Globals {
                 view_proj: view_proj.to_cols_array_2d(),
                 eye: eye.extend(1.0).to_array(),
@@ -631,6 +658,13 @@ impl BodyCallback {
                 up: up.extend(0.0).to_array(),
             },
         }
+    }
+
+    /// Draw liquid as a smooth surface (if the GPU supports it); the
+    /// `particles` passed to [`Self::new`] are then skipped.
+    pub fn with_surface(mut self, frame: SurfaceFrame) -> Self {
+        self.surface = Some(frame);
+        self
     }
 
     /// Light the scene from a point (a star) instead of a distant sun, with
@@ -657,8 +691,8 @@ impl CallbackTrait for BodyCallback {
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        _screen: &ScreenDescriptor,
-        _encoder: &mut wgpu::CommandEncoder,
+        screen: &ScreenDescriptor,
+        encoder: &mut wgpu::CommandEncoder,
         resources: &mut CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
         let Some(r) = resources.get_mut::<BodyRenderer>() else {
@@ -707,6 +741,60 @@ impl CallbackTrait for BodyCallback {
             .enumerate()
             .map(|(k, (range, _))| (range.clone(), self.particles_end + k as u32))
             .collect();
+
+        // Smooth liquid: draw the opaque scene offscreen, then the surface
+        // passes (see surface.rs).
+        if let Some(mut surface) = r.surface.take() {
+            surface.active = false;
+            if let Some(frame) = &self.surface {
+                let ppp = screen.pixels_per_point;
+                let size = (
+                    (frame.rect.width() * ppp).round() as u32,
+                    (frame.rect.height() * ppp).round() as u32,
+                );
+                let origin = (frame.rect.min.x * ppp, frame.rect.min.y * ppp);
+                {
+                    let (color, depth) = surface.scene_targets(device, size);
+                    let sky = frame.view.sky;
+                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("surface scene"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: color,
+                            resolve_target: None,
+                            depth_slice: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color {
+                                    r: f64::from(sky[0]),
+                                    g: f64::from(sky[1]),
+                                    b: f64::from(sky[2]),
+                                    a: 1.0,
+                                }),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                            view: depth,
+                            depth_ops: Some(wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(1.0),
+                                store: wgpu::StoreOp::Store,
+                            }),
+                            stencil_ops: None,
+                        }),
+                        ..Default::default()
+                    });
+                    draw_opaque(r, &mut pass, &r.scene_pipeline, false);
+                }
+                surface.render(
+                    device,
+                    queue,
+                    encoder,
+                    &frame.particles,
+                    &frame.view,
+                    origin,
+                );
+            }
+            r.surface = Some(surface);
+        }
         Vec::new()
     }
 
@@ -722,27 +810,13 @@ impl CallbackTrait for BodyCallback {
         if r.total == 0 && r.soft_draws.is_empty() && r.splat_count == 0 {
             return;
         }
-        pass.set_pipeline(&r.pipeline);
-        pass.set_bind_group(0, &r.bind_group, &[]);
-        pass.set_vertex_buffer(1, r.instances.slice(..));
-        for (mesh, range) in [
-            (&r.cube, 0..r.cubes),
-            (&r.sphere, r.cubes..r.spheres_end),
-            (&r.particle, r.spheres_end..r.total),
-        ] {
-            if range.is_empty() {
-                continue;
-            }
-            pass.set_vertex_buffer(0, mesh.vertices.slice(..));
-            pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
-            pass.draw_indexed(0..mesh.index_count, 0, range);
-        }
-        if !r.soft_draws.is_empty() {
-            pass.set_vertex_buffer(0, r.soft_vertices.slice(..));
-            pass.set_index_buffer(r.soft_indices.slice(..), wgpu::IndexFormat::Uint32);
-            for (range, instance) in &r.soft_draws {
-                pass.draw_indexed(range.clone(), 0, *instance..*instance + 1);
-            }
+        let surface = r
+            .surface
+            .as_ref()
+            .filter(|s| s.active && self.surface.is_some());
+        draw_opaque(r, pass, &r.pipeline, surface.is_none());
+        if let Some(surface) = surface {
+            surface.composite(pass);
         }
         // Smoke last, over everything opaque.
         if r.splat_count > 0 {
@@ -754,6 +828,38 @@ impl CallbackTrait for BodyCallback {
             pass.set_bind_group(0, &r.bind_group, &[]);
             pass.set_vertex_buffer(0, r.splats.slice(..));
             pass.draw(0..6, 0..r.splat_count);
+        }
+    }
+}
+
+/// Bodies, soft bodies, and (if `particles`) fluid particles as balls.
+fn draw_opaque(
+    r: &BodyRenderer,
+    pass: &mut wgpu::RenderPass<'_>,
+    pipeline: &wgpu::RenderPipeline,
+    particles: bool,
+) {
+    pass.set_pipeline(pipeline);
+    pass.set_bind_group(0, &r.bind_group, &[]);
+    pass.set_vertex_buffer(1, r.instances.slice(..));
+    let particle_end = if particles { r.total } else { r.spheres_end };
+    for (mesh, range) in [
+        (&r.cube, 0..r.cubes),
+        (&r.sphere, r.cubes..r.spheres_end),
+        (&r.particle, r.spheres_end..particle_end),
+    ] {
+        if range.is_empty() {
+            continue;
+        }
+        pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+        pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+        pass.draw_indexed(0..mesh.index_count, 0, range);
+    }
+    if !r.soft_draws.is_empty() {
+        pass.set_vertex_buffer(0, r.soft_vertices.slice(..));
+        pass.set_index_buffer(r.soft_indices.slice(..), wgpu::IndexFormat::Uint32);
+        for (range, instance) in &r.soft_draws {
+            pass.draw_indexed(range.clone(), 0, *instance..*instance + 1);
         }
     }
 }

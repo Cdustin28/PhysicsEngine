@@ -350,8 +350,8 @@ Not yet: undo in the Orbits tab, saving systems as files (they're kept between s
 
 1. [x] CPU speed-up (#16)
 2. [x] **Several liquids** in the 2D and 3D tabs (#17)
-3. [x] **Heat in the liquids** (this step)
-4. [ ] Smooth-surface rendering (a toggle in 2D/3D, off by default)
+3. [x] **Heat in the liquids** (#18)
+4. [x] **Smooth-surface rendering** (this step; a toggle in 2D and 3D, off by default)
 5. [ ] The Fluids tab: box, placing tools, solids, heat tools, readouts
 6. [ ] Air, boiling, and condensing
 7. [ ] Validation cases
@@ -395,6 +395,12 @@ Not yet: undo in the Orbits tab, saving systems as files (they're kept between s
 | Warm water at the bottom (2D blob, 3D layer) | rises |
 | Hot walls | heat the water, never past the wall temperature |
 | 80 °C water under the air grid | air gains heat; total energy conserved to 5% of what moved |
+
+**Smooth-surface rendering** (editor; "Smooth surfaces" under Liquids in 3D and under Fluid in 2D, off by default, on in the Fluids tab when it comes):
+- [x] 3D: screen-space fluid rendering (van der Laan, Green & Sainz 2009). Each particle is drawn as a sphere imposter into an eye-depth texture and an additive thickness texture; four passes of a depth-aware blur turn the bumpy spheres into one surface (normals are smooth across the pool, sharp at silhouettes). The composite shades it with Fresnel reflection of the sky, refraction of the scene behind, Beer–Lambert absorption through the thickness (thin films clear, deep pools colored), and light scattered back out of the liquid's body.
+- [x] Mercury is drawn as a metal: opaque, reflecting about 75% like polished steel. It keeps its own thickness and mean depth, so a clear liquid tints it only when it's in front (oil floating on mercury), not when it's behind.
+- [x] 2D: a metaball surface: each particle adds a smooth bump to a fine density grid (3 cells per spacing), the liquid is wherever the field passes half its interior value, colors blend the same way, and a lighter band traces the free surface. The covered area matches the particles' area to 10% (test).
+- [x] Needs float render targets; where they're missing (some WebGL), the 3D toggle falls back to balls.
 
 Known limit: buoyant blobs that are resolved (several particles across) rise more slowly than real ones; a perfectly flat oil layer under water waits for a disturbance before it overturns, as it would in reality. An implicit incompressible solver (DFSPH) was tried and didn't help; it's parked.
 
