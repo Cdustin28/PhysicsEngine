@@ -209,9 +209,9 @@ impl From<Liquid> for LiquidSpec {
 /// Density of pure water at `c` °C, kg/m³ (Tanaka et al. 2001, valid
 /// 0–40 °C to a few ppm and within 0.1% to 100 °C).
 fn water_density_tanaka(c: f32) -> f32 {
-    let c = c.clamp(0.0, 100.0);
+    let c = f64::from(c.clamp(0.0, 100.0));
     let (a1, a2, a3, a4, a5) = (-3.983_035, 301.797, 522_528.9, 69.348_81, 999.974_95);
-    a5 * (1.0 - (c + a1) * (c + a1) * (c + a2) / (a3 * (c + a4)))
+    (a5 * (1.0 - (c + a1) * (c + a1) * (c + a2) / (a3 * (c + a4)))) as f32
 }
 
 /// Interfacial tension between two different liquids, N/m (between a liquid
