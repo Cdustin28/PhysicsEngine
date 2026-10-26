@@ -95,6 +95,7 @@ enum FluidShape {
 enum ColorBy {
     Speed,
     Pressure,
+    Temperature,
 }
 
 /// Parameters for the next object placed with the Circle or Box tool.
@@ -227,6 +228,7 @@ struct Persisted {
     new_body: NewBodySettings,
     fluid_shape: FluidShape,
     liquid: crate::liquid_ui::LiquidChoice,
+    liquid_celsius: f32,
     brush_radius: f32,
     color_by: ColorBy,
     show_contacts: bool,
@@ -253,6 +255,7 @@ impl Default for Persisted {
             new_body: NewBodySettings::default(),
             fluid_shape: FluidShape::Rectangle,
             liquid: Default::default(),
+            liquid_celsius: 20.0,
             brush_radius: 0.3,
             color_by: ColorBy::Speed,
             show_contacts: false,
@@ -293,6 +296,8 @@ pub struct EditorApp {
     fluid_shape: FluidShape,
     /// Which liquid the Fluid tool places.
     liquid: crate::liquid_ui::LiquidChoice,
+    /// Temperature the Fluid tool places liquid at, °C.
+    liquid_celsius: f32,
     /// Radius of the fluid brush and the eraser, m.
     brush_radius: f32,
     /// Where a rectangle fill drag started.
@@ -459,6 +464,7 @@ impl EditorApp {
             show_contacts: p.show_contacts,
             fluid_shape: p.fluid_shape,
             liquid: p.liquid,
+            liquid_celsius: p.liquid_celsius,
             brush_radius: p.brush_radius,
             fluid_rect_start: None,
             color_by: p.color_by,
@@ -496,6 +502,7 @@ impl EditorApp {
             new_body: self.new_body.clone(),
             fluid_shape: self.fluid_shape,
             liquid: self.liquid,
+            liquid_celsius: self.liquid_celsius,
             brush_radius: self.brush_radius,
             color_by: self.color_by,
             show_contacts: self.show_contacts,

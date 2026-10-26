@@ -392,26 +392,21 @@ impl EditorApp {
                     && let (Some(a), Some(b)) = (self.fluid_rect_start.take(), pointer)
                 {
                     let c = self.liquid;
-                    let added = self.world.fluid.fill_rect_with(
-                        a,
-                        b,
-                        &self.world.bodies,
-                        c.liquid(),
-                        c.salinity(),
-                    );
+                    let spec = c.spec(self.liquid_celsius);
+                    let added = self
+                        .world
+                        .fluid
+                        .fill_rect_as(a, b, &self.world.bodies, spec);
                     self.status = format!("Added {added} particles of {}.", c.noun());
                 }
             }
             (Tool::Fluid, FluidShape::Brush) => {
                 if painting && let Some(p) = pointer {
                     let c = self.liquid;
-                    self.world.fluid.fill_disc_with(
-                        p,
-                        self.brush_radius,
-                        &self.world.bodies,
-                        c.liquid(),
-                        c.salinity(),
-                    );
+                    let spec = c.spec(self.liquid_celsius);
+                    self.world
+                        .fluid
+                        .fill_disc_as(p, self.brush_radius, &self.world.bodies, spec);
                 }
             }
             (Tool::Erase, _) => {
@@ -468,13 +463,20 @@ impl EditorApp {
         let full_pressure =
             fluid.params.rest_density * engine::STANDARD_GRAVITY * PRESSURE_COLOR_DEPTH;
         let color = |i: usize| {
+            let salinity = fluid.salinity.get(i).copied().unwrap_or(0.0);
             let t = match self.color_by {
                 ColorBy::Speed => {
                     fluid.velocities.get(i).map_or(0.0, |v| v.length()) / SPEED_COLOR_SCALE
                 }
                 ColorBy::Pressure => pressures.get(i).map_or(0.0, |&q| q / full_pressure),
+                ColorBy::Temperature => {
+                    return crate::liquid_ui::temperature_color(
+                        fluid.liquid(i),
+                        salinity,
+                        fluid.temperature(i),
+                    );
+                }
             };
-            let salinity = fluid.salinity.get(i).copied().unwrap_or(0.0);
             crate::liquid_ui::particle_color(fluid.liquid(i), salinity, t, WATER_DEEP, WATER_LIGHT)
         };
 

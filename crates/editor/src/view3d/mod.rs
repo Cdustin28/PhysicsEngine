@@ -55,6 +55,10 @@ struct NewBody {
     water_size: Vec3,
     /// Which liquid the Water tool drops.
     liquid: crate::liquid_ui::LiquidChoice,
+    /// At what temperature, °C.
+    liquid_celsius: f32,
+    /// Color liquid by temperature instead of speed.
+    color_by_temperature: bool,
 }
 
 impl Default for NewBody {
@@ -66,6 +70,8 @@ impl Default for NewBody {
             is_static: false,
             water_size: Vec3::new(1.0, 0.6, 1.0),
             liquid: Default::default(),
+            liquid_celsius: 20.0,
+            color_by_temperature: false,
         }
     }
 }

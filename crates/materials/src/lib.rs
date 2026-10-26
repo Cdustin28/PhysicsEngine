@@ -20,6 +20,9 @@ pub const WATER_DENSITY: f32 = 1000.0;
 /// Salinity of ordinary seawater: 35 g of salt per kg.
 pub const SEAWATER_SALINITY: f32 = 0.035;
 
+/// Reference temperature for the properties below, K (20 °C).
+pub const ROOM_TEMPERATURE: f32 = 293.15;
+
 /// Diffusivity of dissolved salt (NaCl) in water, m²/s. Tiny: salt takes
 /// hours to diffuse a few millimeters, so a brine layer under fresh water
 /// stays sharp unless the water is stirred.
@@ -80,6 +83,60 @@ impl Liquid {
         }
     }
 
+    /// Density at temperature `t` (K) relative to its density at 20 °C:
+    /// liquids expand when warmed. Water follows Tanaka et al. (2001)
+    /// (densest at 4 °C: cold water sinks only down to 4 °C); oil and
+    /// mercury expand linearly (β = 7.0 × 10⁻⁴ and 1.82 × 10⁻⁴ per K).
+    pub fn expansion_factor(self, t: f32) -> f32 {
+        let c = t - 273.15;
+        match self {
+            Liquid::Water => water_density_tanaka(c) / water_density_tanaka(20.0),
+            Liquid::Oil => 1.0 - 7.0e-4 * (c - 20.0),
+            Liquid::Mercury => 1.0 / (1.0 + 1.82e-4 * (c - 20.0)),
+        }
+    }
+
+    /// Density at `salinity` and temperature `t` (K), kg/m³.
+    pub fn density_at(self, salinity: f32, t: f32) -> f32 {
+        self.density(salinity) * self.expansion_factor(t)
+    }
+
+    /// Dynamic viscosity at temperature `t` (K), Pa·s. Water: Vogel's
+    /// equation, μ = 2.414 × 10⁻⁵ · 10^(247.8 / (T − 140)); oil and mercury:
+    /// Andrade's, μ = A e^(B/T), through their 20 °C and 100 °C values
+    /// (oil 0.057 → 0.0085, mercury 1.554 → 1.24 mPa·s).
+    pub fn viscosity_at(self, salinity: f32, t: f32) -> f32 {
+        let t = t.clamp(250.0, 650.0);
+        let relative = match self {
+            Liquid::Water => {
+                let vogel = |t: f32| 2.414e-5 * 10f32.powf(247.8 / (t - 140.0));
+                vogel(t) / vogel(ROOM_TEMPERATURE)
+            }
+            Liquid::Oil => (2603.0 * (1.0 / t - 1.0 / ROOM_TEMPERATURE)).exp(),
+            Liquid::Mercury => (309.0 * (1.0 / t - 1.0 / ROOM_TEMPERATURE)).exp(),
+        };
+        self.viscosity(salinity) * relative
+    }
+
+    /// Specific heat capacity, J/(kg·K).
+    pub fn specific_heat(self, salinity: f32) -> f32 {
+        match self {
+            // 4182 fresh, 3993 at 35 g/kg.
+            Liquid::Water => 4182.0 * (1.0 - 1.29 * salinity.max(0.0)),
+            Liquid::Oil => 1970.0,
+            Liquid::Mercury => 139.5,
+        }
+    }
+
+    /// Thermal conductivity, W/(m·K).
+    pub fn conductivity(self, salinity: f32) -> f32 {
+        match self {
+            Liquid::Water => 0.598 * (1.0 - 0.1 * salinity.max(0.0)),
+            Liquid::Oil => 0.17,
+            Liquid::Mercury => 8.3,
+        }
+    }
+
     /// Display color, sRGB.
     pub fn color(self, salinity: f32) -> [u8; 3] {
         match self {
@@ -89,6 +146,72 @@ impl Liquid {
             Liquid::Mercury => [176, 180, 188],
         }
     }
+}
+
+/// What to fill with: a liquid, its salinity (water only), and its
+/// temperature.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LiquidSpec {
+    pub liquid: Liquid,
+    /// Mass fraction of salt; ignored except for water.
+    pub salinity: f32,
+    /// K.
+    pub temperature: f32,
+}
+
+impl LiquidSpec {
+    /// `liquid`, fresh, at room temperature.
+    pub fn new(liquid: Liquid) -> Self {
+        Self {
+            liquid,
+            salinity: 0.0,
+            temperature: ROOM_TEMPERATURE,
+        }
+    }
+
+    /// Fresh water at room temperature.
+    pub fn water() -> Self {
+        Self::new(Liquid::Water)
+    }
+
+    /// Seawater (35 g/kg) at room temperature.
+    pub fn seawater() -> Self {
+        Self::water().with_salinity(SEAWATER_SALINITY)
+    }
+
+    pub fn with_salinity(mut self, salinity: f32) -> Self {
+        self.salinity = salinity;
+        self
+    }
+
+    /// At `temperature` K.
+    pub fn at(mut self, temperature: f32) -> Self {
+        self.temperature = temperature;
+        self
+    }
+
+    /// Salinity as stored: clamped, and zero for anything but water.
+    pub fn stored_salinity(&self) -> f32 {
+        if self.liquid == Liquid::Water {
+            self.salinity.clamp(0.0, 0.4)
+        } else {
+            0.0
+        }
+    }
+}
+
+impl From<Liquid> for LiquidSpec {
+    fn from(liquid: Liquid) -> Self {
+        Self::new(liquid)
+    }
+}
+
+/// Density of pure water at `c` °C, kg/m³ (Tanaka et al. 2001, valid
+/// 0–40 °C to a few ppm and within 0.1% to 100 °C).
+fn water_density_tanaka(c: f32) -> f32 {
+    let c = c.clamp(0.0, 100.0);
+    let (a1, a2, a3, a4, a5) = (-3.983_035, 301.797, 522_528.9, 69.348_81, 999.974_95);
+    a5 * (1.0 - (c + a1) * (c + a1) * (c + a2) / (a3 * (c + a4)))
 }
 
 /// Interfacial tension between two different liquids, N/m (between a liquid
@@ -138,6 +261,24 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn thermal_properties_match_tables() {
+        let k = |c: f32| c + 273.15;
+        // Water: densest near 4 °C; 958.4 kg/m³ at 100 °C (CRC).
+        let w = Liquid::Water;
+        assert!(w.expansion_factor(k(4.0)) > w.expansion_factor(k(0.0)));
+        assert!(w.expansion_factor(k(4.0)) > w.expansion_factor(k(10.0)));
+        assert!((water_density_tanaka(100.0) - 958.4).abs() < 1.0);
+        assert!((water_density_tanaka(20.0) - 998.2).abs() < 0.1);
+        // Water viscosity: 1.002 mPa·s at 20 °C, 0.282 at 100 °C.
+        assert!((w.viscosity_at(0.0, k(100.0)) - 0.282e-3).abs() < 0.01e-3);
+        // Oil at 100 °C, mercury at 100 °C.
+        assert!((Liquid::Oil.viscosity_at(0.0, k(100.0)) - 0.0085).abs() < 1e-4);
+        assert!((Liquid::Mercury.viscosity_at(0.0, k(100.0)) - 1.24e-3).abs() < 1e-5);
+        // Seawater's specific heat ≈ 3993 J/(kg·K).
+        assert!((w.specific_heat(SEAWATER_SALINITY) - 3993.0).abs() < 5.0);
     }
 
     #[test]

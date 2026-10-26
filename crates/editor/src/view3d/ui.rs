@@ -173,7 +173,7 @@ impl Editor3d {
             Tool::Smoke => self.smoke_tool_options(ui),
             Tool::Chain => self.chain_tool_options(ui),
             Tool::Water => {
-                nb.liquid.picker(ui);
+                nb.liquid.picker(ui, &mut nb.liquid_celsius);
                 egui::Grid::new("new_water3d")
                     .num_columns(2)
                     .show(ui, |ui| {
@@ -194,7 +194,11 @@ impl Editor3d {
     }
 
     fn fluid_panel(&mut self, ui: &mut Ui) {
-        ui.heading("Water");
+        ui.heading("Liquids");
+        ui.checkbox(
+            &mut self.new_body.color_by_temperature,
+            "Color by temperature",
+        );
         let fluid = &mut self.world.fluid;
         egui::Grid::new("fluid3d").num_columns(2).show(ui, |ui| {
             ui.label("Particles");
@@ -566,13 +570,11 @@ impl Editor3d {
         let size = self.new_body.water_size;
         let lo = ground + Vec3::new(-0.5 * size.x, 0.0, -0.5 * size.z);
         let c = self.new_body.liquid;
-        let added = self.world.fluid.fill_box_with(
-            lo,
-            lo + size,
-            &self.world.bodies,
-            c.liquid(),
-            c.salinity(),
-        );
+        let spec = c.spec(self.new_body.liquid_celsius);
+        let added = self
+            .world
+            .fluid
+            .fill_box_as(lo, lo + size, &self.world.bodies, spec);
         self.status = if added == 0 {
             format!("No room for {} there.", c.noun())
         } else {
@@ -682,13 +684,21 @@ impl Editor3d {
                 scale: radius,
                 highlight: 0.0,
                 rotation: [0.0, 0.0, 0.0, 1.0],
-                color: crate::liquid_ui::particle_color(
-                    fluid.liquid(i),
-                    fluid.salinity.get(i).copied().unwrap_or(0.0),
-                    v.length() / SPEED_COLOR_SCALE,
-                    WATER_DEEP,
-                    WATER_LIGHT,
-                )
+                color: if self.new_body.color_by_temperature {
+                    crate::liquid_ui::temperature_color(
+                        fluid.liquid(i),
+                        fluid.salinity.get(i).copied().unwrap_or(0.0),
+                        fluid.temperature(i),
+                    )
+                } else {
+                    crate::liquid_ui::particle_color(
+                        fluid.liquid(i),
+                        fluid.salinity.get(i).copied().unwrap_or(0.0),
+                        v.length() / SPEED_COLOR_SCALE,
+                        WATER_DEEP,
+                        WATER_LIGHT,
+                    )
+                }
                 .to_array(),
             })
             .collect();

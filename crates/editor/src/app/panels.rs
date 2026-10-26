@@ -263,7 +263,7 @@ impl EditorApp {
                     ui.selectable_value(&mut self.fluid_shape, FluidShape::Rectangle, "Rectangle");
                     ui.selectable_value(&mut self.fluid_shape, FluidShape::Brush, "Brush");
                 });
-                self.liquid.picker(ui);
+                self.liquid.picker(ui, &mut self.liquid_celsius);
                 if self.fluid_shape == FluidShape::Brush {
                     egui::Grid::new("brush").num_columns(2).show(ui, |ui| {
                         length_row(ui, "Brush radius", &mut self.brush_radius);
@@ -571,6 +571,7 @@ impl EditorApp {
                     ui.horizontal(|ui| {
                         ui.selectable_value(&mut self.color_by, ColorBy::Speed, "Speed");
                         ui.selectable_value(&mut self.color_by, ColorBy::Pressure, "Pressure");
+                        ui.selectable_value(&mut self.color_by, ColorBy::Temperature, "Temperature");
                     });
                     ui.end_row();
                 });
