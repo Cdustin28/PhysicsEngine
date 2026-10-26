@@ -11,6 +11,7 @@ repository.workspace = true
 glam.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+materials = { path = "../materials" }
 rayon = { version = "1.12", optional = true }
 
 [features]

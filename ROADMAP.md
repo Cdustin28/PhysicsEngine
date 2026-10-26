@@ -344,8 +344,37 @@ Restitution is applied to the velocity at the start of the contact step, which i
 
 Not yet: undo in the Orbits tab, saving systems as files (they're kept between sessions), Mars's moons in the example, and rings.
 
+## M12: Liquids (in progress)
+
+**Goal:** real liquids with heat, and a Fluids tab: a 3D box (vacuum or 1 atm air) to place water, salt water, oil, mercury, and steam in, drawn as smooth surfaces. Delivered in steps:
+
+1. [x] CPU speed-up (#16)
+2. [x] **Several liquids** in the 2D and 3D tabs (this step)
+3. [ ] Heat in the liquids: temperature per particle, conduction, thermal expansion
+4. [ ] Smooth-surface rendering (a toggle in 2D/3D, off by default)
+5. [ ] The Fluids tab: box, placing tools, solids, heat tools, readouts
+6. [ ] Air, boiling, and condensing
+7. [ ] Validation cases
+
+**Several liquids** (`materials` crate for the properties; both engines):
+- [x] Water, salt water (water with a salinity), canola oil, and mercury, with real densities (920–13,546 kg/m³) and viscosities (CRC Handbook; TEOS-10 for seawater).
+- [x] Multiphase SPH after Solenthaler & Pajarola (2008): each particle sums *number* density and the pressure force is −Σ (pᵢ/δᵢ² + pⱼ/δⱼ²) ∇W, so a water particle next to mercury doesn't count mercury's mass as its own density (13.5× contrast). With one liquid this is exactly the old formulation.
+- [x] Each liquid's real viscosity (Morris et al. 1997 Laplacian; checked against ∇²(y²) = 2 on the lattice), switched on only where it's resolvable: at least 1% of the artificial viscosity every particle gets.
+- [x] Salt diffuses between water particles at its real rate (1.5 × 10⁻⁹ m²/s, so a brine layer stays sharp for hours) and changes density as it goes; total salt is conserved.
+- [x] Surface and interfacial tension (Akinci et al. 2013 cohesion, normalized by mean-field theory so each surface's and interface's tension is the real one), used only for particles small enough that surface tension can beat a particle's weight (Bond number ≤ 1: water under 2.7 mm). At coarser spacing the pairwise forces glue liquids in place (a 2 cm oil blob at 4 mm spacing, Bond number 12, never rose), so they're left out.
+- [x] The default artificial viscosity went from 0.05 to 0.01: at 0.05 a rising blob of oil stayed put.
+- [x] Editor: a liquid picker in the 2D Fluid tool and the 3D Water tool; particles drawn in each liquid's color (oil amber, mercury silver, salt water teal). New "Liquids" example in 2D and 3D: four liquids poured in the wrong order sort themselves.
+- [x] The GPU solvers still handle fresh water only; a scene with any other liquid steps on the CPU.
+
+| Check (tests/liquids.rs, liquids3d.rs) | Result |
+|---|---|
+| Mercury slab on water (2D) | sinks to the bottom in 4 s |
+| Inverted oil / water / mercury (3D) | sorts to mercury < water < oil in 5 s |
+| Layered hydrostatics (2D) | dp/dy within 15% of ρg in water, 20% in mercury (WCSPH pressure noise) |
+| Momentum, oil blob hitting mercury blob | conserved to 10⁻⁴ |
+| Salt diffusion | total salt conserved to 10⁻³; spreads across the interface |
+
+Known limit: SPH particles settle into a lattice that resists very slow flows. A blob of oil only one or two particles across stays where it is, and a perfectly flat layer of oil under water waits for a disturbance before it overturns (any perturbation is enough, as in reality). A blob several particles across rises, though more slowly than a real one. An implicit incompressible solver (DFSPH) was tried and didn't fix this; it's parked.
+
 ## Later
 
-- Multiphase fluids (oil and water)
-- Heat in the SPH fluid
-- Screen-space fluid surface rendering

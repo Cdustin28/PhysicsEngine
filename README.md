@@ -4,7 +4,7 @@ A rigid-body and particle-fluid physics engine with an interactive editor, writt
 
 Website: [physicsengine.dev](https://physicsengine.dev) · Simulator in your browser: [physicsengine.dev/sim](https://physicsengine.dev/sim/) · Validation: [physicsengine.dev/validation](https://physicsengine.dev/validation/) · Plan: [ROADMAP.md](ROADMAP.md)
 
-> **Status:** milestone M11. In 2D and 3D, rigid bodies (boxes and circles or spheres) collide, stack, bounce, roll, and slide with friction, and can be joined by pins, rods, ropes, springs, and chains; soft blobs, jelly, and cloth deform and push them around; smoke and hot air rise around them; SPH water flows around them, and bodies float, sink, and get pushed by it, on the CPU or (desktop) the GPU. The editor switches between 2D, 3D, and an Orbits tab (a star, planets, and moons under N-body gravity in real units, starting from the Solar System), has undo and a dark mode, and runs in the browser. A [validation page](https://physicsengine.dev/validation/) runs both engines against exact physics on every deploy.
+> **Status:** milestone M11. In 2D and 3D, rigid bodies (boxes and circles or spheres) collide, stack, bounce, roll, and slide with friction, and can be joined by pins, rods, ropes, springs, and chains; soft blobs, jelly, and cloth deform and push them around; smoke and hot air rise around them; SPH liquids (water, salt water, oil, and mercury, which sort themselves by density) flow around them, and bodies float, sink, and get pushed by them, on the CPU (fresh water also on the desktop GPU). The editor switches between 2D, 3D, and an Orbits tab (a star, planets, and moons under N-body gravity in real units, starting from the Solar System), has undo and a dark mode, and runs in the browser. A [validation page](https://physicsengine.dev/validation/) runs both engines against exact physics on every deploy.
 
 ## Running it
 
@@ -88,6 +88,7 @@ crates/
     tests/physics.rs   rigid-body validation against known answers
     tests/fluid.rs     fluid validation (hydrostatics, dam break, leaks)
     tests/coupling.rs  fluid ↔ body validation (Archimedes, momentum exchange)
+    tests/liquids.rs   several liquids (density sorting, layered hydrostatics, salt diffusion)
     tests/joints.rs    joint validation (pendulum period, energy, springs, ropes, chains)
     tests/soft.rs      soft-body validation (Hooke's law, area, momentum, energy)
     tests/gas.rs       smoke/heat validation (heat diffusion, buoyancy, hydrostatics)
@@ -96,10 +97,12 @@ crates/
             and planetary orbits (src/orbits.rs).
     tests/physics3d.rs validation against closed-form answers (sliding, rolling, bouncing, stacking)
     tests/fluid3d.rs   fluid validation (hydrostatics, leaks, Archimedes, momentum exchange)
+    tests/liquids3d.rs several liquids (density sorting, momentum, salt diffusion)
     tests/joints3d.rs  joint validation (pendulums incl. conical, springs, chains)
     tests/soft3d.rs    soft-body validation (Hooke's law, volume, cloth draping, momentum)
     tests/gas3d.rs     smoke/heat validation (heat diffusion, buoyancy, hydrostatics)
     tests/orbits.rs    N-body orbits (Kepler's third law, Earth's year, the Moon's month, conservation)
+  materials/ physical properties of the liquids (density, viscosity, surface tension), shared by both engines
   gpu/      the SPH solvers as wgpu compute shaders (sph.wgsl, sph3d.wgsl); tests check they agree with the CPU
   validation/ runs the engines against exact results and writes physicsengine.dev/validation
             (cargo run --release -p validation [-- OUTPUT_DIR]; exits non-zero if a check fails)

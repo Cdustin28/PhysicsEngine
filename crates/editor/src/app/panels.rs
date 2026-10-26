@@ -263,14 +263,22 @@ impl EditorApp {
                     ui.selectable_value(&mut self.fluid_shape, FluidShape::Rectangle, "Rectangle");
                     ui.selectable_value(&mut self.fluid_shape, FluidShape::Brush, "Brush");
                 });
+                self.liquid.picker(ui);
                 if self.fluid_shape == FluidShape::Brush {
                     egui::Grid::new("brush").num_columns(2).show(ui, |ui| {
                         length_row(ui, "Brush radius", &mut self.brush_radius);
                     });
-                    ui.weak("Drag on the canvas to paint water.");
+                    ui.weak(format!(
+                        "Drag on the canvas to paint {}.",
+                        self.liquid.noun()
+                    ));
                 } else {
-                    ui.weak("Drag a rectangle on the canvas to fill it with water.");
+                    ui.weak(format!(
+                        "Drag a rectangle on the canvas to fill it with {}.",
+                        self.liquid.noun()
+                    ));
                 }
+                crate::liquid_ui::hint(ui);
             }
             Tool::Erase => {
                 ui.add_space(6.0);

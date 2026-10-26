@@ -69,6 +69,56 @@ impl CubicSpline {
     }
 }
 
+/// The cohesion force shape of Akinci et al. (2013), "Versatile surface
+/// tension and adhesion for SPH fluids", as a function of q = r / h:
+/// attractive (positive) for q > ½, repulsive close in, so particles hold
+/// together without clumping.
+pub fn cohesion_shape(q: f32) -> f32 {
+    if q >= 1.0 || q <= 0.0 {
+        0.0
+    } else if q > 0.5 {
+        let t = (1.0 - q) * q;
+        t * t * t
+    } else {
+        let t = (1.0 - q) * q;
+        2.0 * t * t * t - 1.0 / 64.0
+    }
+}
+
+/// Normalization for cohesion: with a pair force F(r) = k V² s(r/h) / J
+/// between particles of volume V, a flat surface of uniformly spaced
+/// particles has surface tension exactly k (mean-field theory: σ =
+/// −(n²/2) ∫_(z>0) z φ(r) dV for pair potential φ and number density n).
+/// Here Ψ(r) = ∫ᵣʰ s(t/h) dt and J = (π/2) ∫₀ʰ r³ Ψ(r) dr.
+pub fn cohesion_normalization(h: f32) -> f32 {
+    std::f32::consts::FRAC_PI_2 * h * h * h * h * h * unit_integral(3)
+}
+
+/// ∫₀¹ q^(d) S(q) dq with S(q) = ∫_q¹ s(u) du, by Simpson's rule (once).
+fn unit_integral(d: i32) -> f32 {
+    use std::sync::OnceLock;
+    static CACHE: OnceLock<f32> = OnceLock::new();
+    *CACHE.get_or_init(|| {
+        let n = 4000;
+        let du = 1.0 / n as f64;
+        // S on the grid, integrating s from the top down.
+        let mut big_s = vec![0.0_f64; n + 1];
+        for k in (0..n).rev() {
+            let (a, b) = (k as f64 * du, (k + 1) as f64 * du);
+            let mid = 0.5 * (a + b);
+            let f = |q: f64| f64::from(cohesion_shape(q as f32));
+            big_s[k] = big_s[k + 1] + du / 6.0 * (f(a) + 4.0 * f(mid) + f(b));
+        }
+        let mut sum = 0.0;
+        for k in 0..n {
+            let (a, b) = (k as f64 * du, (k + 1) as f64 * du);
+            let g = |q: f64, s: f64| q.powi(d) * s;
+            sum += 0.5 * du * (g(a, big_s[k]) + g(b, big_s[k + 1]));
+        }
+        sum as f32
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

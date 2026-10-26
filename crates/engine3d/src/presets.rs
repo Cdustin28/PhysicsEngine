@@ -16,6 +16,7 @@ pub const ALL: &[Preset] = &[
     ("bounce", bounce),
     ("dam_break", dam_break),
     ("buoyancy", buoyancy),
+    ("liquids", liquids),
     ("pendulums", pendulums),
     ("newtons_cradle", newtons_cradle),
     ("chain_drape", chain_drape),
@@ -61,6 +62,39 @@ pub fn dam_break() -> World {
         Vec3::new(-1.5, 0.0, -0.6),
         Vec3::new(-0.6, 1.0, 0.6),
         &bodies,
+    );
+    w
+}
+
+/// Liquids in the wrong order: oil at the bottom, then salt water, fresh
+/// water, and a slab of mercury on top. They sort themselves by density.
+pub fn liquids() -> World {
+    use crate::fluid::{Liquid, SEAWATER_SALINITY};
+    let mut w = tank(1.6, 1.2, 1.8);
+    let b = w.bodies.clone();
+    let f = &mut w.fluid;
+    let (x, z) = (0.8, 0.6);
+    f.fill_box_with(
+        Vec3::new(-x, 0.0, -z),
+        Vec3::new(x, 0.3, z),
+        &b,
+        Liquid::Oil,
+        0.0,
+    );
+    f.fill_box_with(
+        Vec3::new(-x, 0.3, -z),
+        Vec3::new(x, 0.6, z),
+        &b,
+        Liquid::Water,
+        SEAWATER_SALINITY,
+    );
+    f.fill_box(Vec3::new(-x, 0.6, -z), Vec3::new(x, 0.9, z), &b);
+    f.fill_box_with(
+        Vec3::new(-0.4, 1.2, -0.3),
+        Vec3::new(0.4, 1.35, 0.3),
+        &b,
+        Liquid::Mercury,
+        0.0,
     );
     w
 }

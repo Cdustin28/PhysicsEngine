@@ -4,6 +4,7 @@
 mod app;
 mod camera;
 mod history;
+mod liquid_ui;
 mod orbits;
 mod particles;
 mod theme;

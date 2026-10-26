@@ -53,6 +53,8 @@ struct NewBody {
     is_static: bool,
     /// Size of the block of water the Water tool drops, m.
     water_size: Vec3,
+    /// Which liquid the Water tool drops.
+    liquid: crate::liquid_ui::LiquidChoice,
 }
 
 impl Default for NewBody {
@@ -63,6 +65,7 @@ impl Default for NewBody {
             density: RigidBody::DEFAULT_DENSITY,
             is_static: false,
             water_size: Vec3::new(1.0, 0.6, 1.0),
+            liquid: Default::default(),
         }
     }
 }

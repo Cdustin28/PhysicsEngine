@@ -173,6 +173,7 @@ impl Editor3d {
             Tool::Smoke => self.smoke_tool_options(ui),
             Tool::Chain => self.chain_tool_options(ui),
             Tool::Water => {
+                nb.liquid.picker(ui);
                 egui::Grid::new("new_water3d")
                     .num_columns(2)
                     .show(ui, |ui| {
@@ -183,9 +184,11 @@ impl Editor3d {
                 let spacing = self.world.fluid.params.particle_spacing;
                 let count = (nb.water_size / spacing).floor();
                 ui.weak(format!(
-                    "Click to drop a block of water (about {} particles).",
+                    "Click to drop a block of {} (about {} particles).",
+                    nb.liquid.noun(),
                     (count.x * count.y * count.z) as u64
                 ));
+                crate::liquid_ui::hint(ui);
             }
         }
     }
@@ -562,11 +565,21 @@ impl Editor3d {
         };
         let size = self.new_body.water_size;
         let lo = ground + Vec3::new(-0.5 * size.x, 0.0, -0.5 * size.z);
-        let added = self.world.fluid.fill_box(lo, lo + size, &self.world.bodies);
+        let c = self.new_body.liquid;
+        let added = self.world.fluid.fill_box_with(
+            lo,
+            lo + size,
+            &self.world.bodies,
+            c.liquid(),
+            c.salinity(),
+        );
         self.status = if added == 0 {
-            "No room for water there.".into()
+            format!("No room for {} there.", c.noun())
         } else {
-            format!("Added {added} water particles. Press Space to play.")
+            format!(
+                "Added {added} particles of {}. Press Space to play.",
+                c.noun()
+            )
         };
     }
 
@@ -662,16 +675,19 @@ impl Editor3d {
                     .iter()
                     .chain(std::iter::repeat(&Vec3::ZERO)),
             )
-            .map(|(p, v)| Instance {
+            .enumerate()
+            .map(|(i, (p, v))| Instance {
                 position: p.to_array(),
                 checker: 0.0,
                 scale: radius,
                 highlight: 0.0,
                 rotation: [0.0, 0.0, 0.0, 1.0],
-                color: lerp_color(
+                color: crate::liquid_ui::particle_color(
+                    fluid.liquid(i),
+                    fluid.salinity.get(i).copied().unwrap_or(0.0),
+                    v.length() / SPEED_COLOR_SCALE,
                     WATER_DEEP,
                     WATER_LIGHT,
-                    (v.length() / SPEED_COLOR_SCALE).min(1.0),
                 )
                 .to_array(),
             })
@@ -728,11 +744,6 @@ impl Editor3d {
             );
         }
     }
-}
-
-fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
-    let mix = |x: u8, y: u8| (f32::from(x) + (f32::from(y) - f32::from(x)) * t).round() as u8;
-    Color32::from_rgb(mix(a.r(), b.r()), mix(a.g(), b.g()), mix(a.b(), b.b()))
 }
 
 fn length_row(ui: &mut Ui, label: &str, value: &mut f32) {

@@ -1,0 +1,17 @@
+[package]
+name = "materials"
+description = "Physical properties of the liquids the engines simulate (water, salt water, oil, mercury)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true
