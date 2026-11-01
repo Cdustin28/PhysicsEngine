@@ -272,6 +272,7 @@ impl World {
             &mut self.fluid,
             self.gas.as_mut(),
             &self.bodies,
+            self.gravity,
             self.ambient_pressure,
             wall_temperature,
             &mut self.water,
