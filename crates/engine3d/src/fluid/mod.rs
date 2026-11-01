@@ -195,18 +195,27 @@ impl FluidParams {
     /// (Using ρ₀ d³ instead is off by a percent or two because the kernel sum
     /// over a lattice isn't exactly the integral, and that error shows up as
     /// a startup jolt.)
+    ///
+    /// The kernel's support is always twice the spacing, so the lattice sum
+    /// is the same shape at every spacing and scales as 1/d³: it's computed
+    /// once, at d = 1. (This is called per particle in hot loops; summing
+    /// 343 kernel values each time cost milliseconds per step.)
     pub fn particle_mass(&self) -> f32 {
-        let d = self.particle_spacing;
-        let k = self.kernel();
-        let mut sum = 0.0;
-        for i in -3_i32..=3 {
-            for j in -3_i32..=3 {
-                for l in -3_i32..=3 {
-                    sum += k.w(d * ((i * i + j * j + l * l) as f32).sqrt());
+        static UNIT_LATTICE_SUM: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+        let sum = *UNIT_LATTICE_SUM.get_or_init(|| {
+            let k = CubicSpline::new(2.0);
+            let mut sum = 0.0;
+            for i in -3_i32..=3 {
+                for j in -3_i32..=3 {
+                    for l in -3_i32..=3 {
+                        sum += k.w(((i * i + j * j + l * l) as f32).sqrt());
+                    }
                 }
             }
-        }
-        self.rest_density / sum
+            sum
+        });
+        let d = self.particle_spacing;
+        self.rest_density * d * d * d / sum
     }
 
     /// The speed cap: particles never move faster than this, m/s.
@@ -776,8 +785,12 @@ impl Fluid {
     fn retain(&mut self, keep: impl Fn(Vec3) -> bool) -> usize {
         self.fill_missing_velocities();
         let before = self.positions.len();
-        let mut w = 0;
-        for r in 0..before {
+        // Usually nothing goes: skip rewriting every array then.
+        let Some(first) = self.positions.iter().position(|&p| !keep(p)) else {
+            return 0;
+        };
+        let mut w = first;
+        for r in first..before {
             if keep(self.positions[r]) {
                 self.positions[w] = self.positions[r];
                 self.velocities[w] = self.velocities[r];
@@ -1565,6 +1578,31 @@ impl Fluid {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cached_particle_mass_matches_the_lattice_sum() {
+        for d in [0.02_f32, 0.05, 0.1, 0.37] {
+            let params = FluidParams {
+                particle_spacing: d,
+                ..FluidParams::default()
+            };
+            let k = params.kernel();
+            let mut sum = 0.0;
+            for i in -3_i32..=3 {
+                for j in -3_i32..=3 {
+                    for l in -3_i32..=3 {
+                        sum += k.w(d * ((i * i + j * j + l * l) as f32).sqrt());
+                    }
+                }
+            }
+            let direct = params.rest_density / sum;
+            let cached = params.particle_mass();
+            assert!(
+                (cached / direct - 1.0).abs() < 1e-5,
+                "d {d}: {cached} vs {direct}"
+            );
+        }
+    }
     use crate::shape::Shape;
 
     #[test]
