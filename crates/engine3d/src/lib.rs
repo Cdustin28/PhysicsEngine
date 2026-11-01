@@ -32,6 +32,7 @@ pub mod fluid;
 pub mod gas;
 pub mod joint;
 pub mod orbits;
+pub mod phase;
 pub mod presets;
 pub mod ray;
 pub mod scene;

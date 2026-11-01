@@ -352,8 +352,8 @@ Not yet: undo in the Orbits tab, saving systems as files (they're kept between s
 2. [x] **Several liquids** in the 2D and 3D tabs (#17)
 3. [x] **Heat in the liquids** (#18)
 4. [x] **Smooth-surface rendering** (#19; a toggle in 2D and 3D, off by default)
-5. [x] **The Fluids tab** (this step): box, placing tools, solids, heat tools, readouts
-6. [ ] Air, boiling, and condensing
+5. [x] **The Fluids tab** (#20): box, placing tools, solids, heat tools, readouts
+6. [x] **Air, boiling, and condensing** (this step)
 7. [ ] Validation cases
 
 **Several liquids** (`materials` crate for the properties; both engines):
@@ -422,6 +422,27 @@ Not yet: undo in the Orbits tab, saving systems as files (they're kept between s
 | Seawater limits | boils 0.6 K higher, freezes at −1.9 °C |
 | Fill to 25% | 0.20–0.26 m³ in a 1 m box |
 | Surface shaders | parse and validate (naga) in tests, so a shader error fails CI instead of crashing at startup |
+
+**Air, boiling, and condensing** (`materials::water`, `engine3d::phase`, the air grid):
+- [x] Saturation from **IAPWS-IF97** (the steam-table standard): boiling point vs pressure both ways, 0.01 °C to the critical point. Latent heat by Watson's correlation (2.257 MJ/kg at 100 °C). Salt lowers the vapor pressure by its water activity (0.98 for seawater: boils 0.55 K higher).
+- [x] **Boiling:** a water particle above its boiling point at the pressure it's under (the surroundings plus the water above it) turns the excess heat into vapor, m c (T − T_sat) = L dm. So water boils at 100 °C in air and at room temperature in vacuum, where the upper layer flash-boils toward 0 °C while deeper water is held liquid by the water's own weight. Bubbles aren't resolved: the vapor goes straight to the air above, and nucleation is instant.
+- [x] **Evaporation and condensation at the surface** into the air cell above: j = h_m (a ρ_sat(T) − ρ_v) (Lewis analogy to the surface's natural convection), capped at the Hertz–Knudsen rate (evaporation coefficient 0.1).
+- [x] **Vapor and mist in the air grid:** vapor is carried with the air and makes it lighter (virtual temperature); beyond saturation it condenses to mist (drawn white: real steam is invisible), warming the air with its latent heat, and mist re-evaporates in drier air. The Fluids tab's air starts at 50% humidity (adjustable).
+- [x] **Dew:** air touching a surface held below its dew point loses vapor onto it; a particle's worth becomes a drop.
+- [x] **Nucleate boiling** at hot walls and plates (Jakob, h = 5.56 ΔT³, capped at the 1.26 MW/m² critical heat flux), so plates can go to 250 °C. Water's density now continues past 100 °C instead of being clamped (which zeroed natural convection above boiling).
+- [x] Particles carry an evaporated fraction; whole particles disappear when boiled away (their salt goes to the nearest water) and appear when a particle's worth condenses. Every kilogram is accounted for: liquid, vapor, mist, dew, and vapor vented to vacuum.
+- [x] Fluids tab: Steam tool (S), humidity, Boils-at in the probe, steam/mist/dew/boiled-off and latent heat in the totals and graph.
+
+| Check (tests/phase3d.rs, materials) | Result |
+|---|---|
+| IF97 verification points (0.1 MPa, 1 MPa) | within 0.005 K and 0.01 K |
+| 99 °C water on a 150 °C plate | boils; hottest 100.0–100.8 °C (hydrostatic) |
+| 20 °C water in vacuum, 1 s | cools below 5 °C; water mass conserved to 10⁻⁵; latent heat matches the vented vapor within 15% |
+| 60 °C water into dry air | water mass to 10⁻⁵; heat lost = latent + air warming within 2% |
+| Humid air over a 5 °C plate | dew forms; water mass to 10⁻⁵ |
+| Steam puff into 50% humid air | turns to mist; nowhere supersaturated |
+
+Known limits: only water changes phase (oil stops at its smoke point, mercury at its boiling point, with the excess heat counted); no freezing yet (water stops at 0.01 °C); the air grid's advection isn't exactly mass-conserving (steam puffs drift up to ~15%). The 2D engine doesn't have phase change.
 
 Known limit (Fluids tab): mercury makes the solver ~4× slower (its density forces a stiffer, faster sound speed). A GPU port of the multiphase solver, for ~100k particles at 2 cm, is the next performance step.
 

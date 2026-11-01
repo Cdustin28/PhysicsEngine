@@ -72,6 +72,8 @@ enum Tool {
     Heat,
     /// Hover to read the liquid; click to pin the probe.
     Probe,
+    /// Click: a puff of steam (air only).
+    Steam,
 }
 
 /// How to color the liquid.
@@ -196,6 +198,10 @@ struct Settings {
     /// Side of a square plate, m.
     plate_size: f32,
     plate_celsius: f32,
+    /// Relative humidity of the air (0–1).
+    humidity: f32,
+    steam_radius: f32,
+    steam_celsius: f32,
     /// Heat brush power, W (negative cools).
     heat_power: f32,
     heat_radius: f32,
@@ -223,6 +229,9 @@ impl Default for Settings {
             solid_size: 0.15,
             plate_size: 0.3,
             plate_celsius: 80.0,
+            humidity: 0.5,
+            steam_radius: 0.1,
+            steam_celsius: 100.0,
             heat_power: 2000.0,
             heat_radius: 0.1,
             color_by: ColorBy::Liquid,
@@ -309,7 +318,8 @@ impl FluidsEditor {
             .and_then(|json| Scene::from_json(json).ok())
             .map(|s| s.world)
             .filter(|w| w.bodies.len() >= BOX_BODIES);
-        let world = restored.unwrap_or_else(|| build_box(&settings));
+        let mut world = restored.unwrap_or_else(|| build_box(&settings));
+        world.ambient_pressure = settings.environment.pressure();
         let mut camera = p.camera;
         camera.limits.min_distance = 0.2;
         camera.limits.max_distance = 30.0;
@@ -505,6 +515,7 @@ impl FluidsEditor {
     fn set_environment(&mut self, env: Environment) {
         self.settings.environment = env;
         self.world.gas = air_for(&self.settings);
+        self.world.ambient_pressure = env.pressure();
     }
 
     fn apply_wall_temperature(&mut self) {
@@ -637,6 +648,25 @@ impl FluidsEditor {
         ));
     }
 
+    /// A puff of steam over the floor point `at`, a little above the
+    /// liquid.
+    fn puff_steam(&mut self, at: Vec3) {
+        let r = self.settings.steam_radius;
+        let (_, hi) = self.inner();
+        let y = (self.surface_height(at.x, at.z, r) + r + 0.05).min(hi.y - r);
+        let t = self.settings.steam_celsius + KELVIN;
+        let Some(gas) = self.world.gas.as_mut() else {
+            self.say("Steam needs air: switch the box to Air.");
+            return;
+        };
+        let kg = gas.add_steam(Vec3::new(at.x, y, at.z), r, t);
+        self.say(format!(
+            "{:.1} g of steam. Real steam is invisible; the white is mist, \
+             where it has cooled below its dew point and condensed.",
+            kg * 1000.0
+        ));
+    }
+
     /// A heater or cooler plate lying on the floor at `at`.
     fn place_plate(&mut self, at: Vec3) {
         let (lo_box, hi_box) = self.inner();
@@ -720,6 +750,7 @@ impl FluidsEditor {
             (Key::P, Tool::Plate),
             (Key::H, Tool::Heat),
             (Key::I, Tool::Probe),
+            (Key::S, Tool::Steam),
         ] {
             if pressed(key) {
                 self.tool = tool;
@@ -761,6 +792,7 @@ fn build_box(s: &Settings) -> World {
         ..FluidParams::default()
     };
     w.gas = air_for(s);
+    w.ambient_pressure = s.environment.pressure();
     w
 }
 
@@ -780,6 +812,7 @@ fn air_for(s: &Settings) -> Option<Gas> {
             );
             gas.params.ambient_temperature = ROOM;
             gas.params.open_top = true;
+            gas.set_humidity(s.humidity);
             Some(gas)
         }
     }

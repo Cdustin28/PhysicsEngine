@@ -22,6 +22,8 @@ pub struct Sample {
     pub thermal: f64,
     /// Heat the brush has added, J.
     pub brush: f64,
+    /// Latent heat taken by evaporation and boiling (net), J.
+    pub latent: f64,
     /// °C.
     pub mean_celsius: f32,
     pub max_celsius: f32,
@@ -122,6 +124,11 @@ impl Graph {
                     Color32::from_rgb(0xF1, 0xBE, 0x48),
                     |s: &Sample| s.brush,
                 ),
+                (
+                    "latent",
+                    Color32::from_rgb(0x8C, 0x96, 0xA0),
+                    |s: &Sample| s.latent,
+                ),
             ],
             Quantity::Temperature => vec![
                 ("mean", Color32::from_rgb(0xC8, 0x10, 0x2E), |s: &Sample| {
@@ -208,6 +215,7 @@ fn sample(world: &World, brush: f64) -> Sample {
         potential: super::potential_energy(world),
         thermal: super::thermal_energy_above_room(world),
         brush,
+        latent: world.water.latent,
         mean_celsius: super::celsius((sum / f64::from(n)) as f32),
         max_celsius: if fluid.is_empty() {
             20.0

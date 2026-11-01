@@ -124,6 +124,24 @@ impl Liquid {
         0.13 * k * ra_per_cubic_metre.cbrt()
     }
 
+    /// Heat transfer coefficient between this liquid at `t_liquid` and a
+    /// surface at `t_wall` (K), W/(m²·K): natural convection, or for water
+    /// against a surface past its boiling point, nucleate boiling (Jakob's
+    /// correlation for water at 1 atm, h = 5.56 ΔT³ with ΔT the wall's
+    /// excess over boiling), capped at the critical heat flux (1.26 MW/m²),
+    /// where the surface would blanket itself in vapor.
+    pub fn wall_heat_transfer(self, salinity: f32, t_liquid: f32, t_wall: f32) -> f32 {
+        let natural = self.natural_convection(salinity, t_liquid, t_wall);
+        let boil = self.max_temperature(salinity);
+        if self != Liquid::Water || t_wall <= boil {
+            return natural;
+        }
+        let excess = t_wall - boil;
+        let nucleate = 5.56 * excess.powi(3);
+        let critical = 1.26e6 / (t_wall - t_liquid).abs().max(1e-3);
+        natural.max(nucleate.min(critical))
+    }
+
     /// Density at `salinity` and temperature `t` (K), kg/m³.
     pub fn density_at(self, salinity: f32, t: f32) -> f32 {
         self.density(salinity) * self.expansion_factor(t)
@@ -269,9 +287,17 @@ impl From<Liquid> for LiquidSpec {
 /// Density of pure water at `c` °C, kg/m³ (Tanaka et al. 2001, valid
 /// 0–40 °C to a few ppm and within 0.1% to 100 °C).
 fn water_density_tanaka(c: f32) -> f32 {
-    let c = f64::from(c.clamp(0.0, 100.0));
     let (a1, a2, a3, a4, a5) = (-3.983_035, 301.797, 522_528.9, 69.348_81, 999.974_95);
-    (a5 * (1.0 - (c + a1) * (c + a1) * (c + a2) / (a3 * (c + a4)))) as f32
+    let rho = |c: f64| a5 * (1.0 - (c + a1) * (c + a1) * (c + a2) / (a3 * (c + a4)));
+    let c = f64::from(c.max(0.0));
+    if c <= 100.0 {
+        rho(c) as f32
+    } else {
+        // Past the fit's range (water just above boiling, before it
+        // flashes), continue at its 100 °C expansion rate (7.5 × 10⁻⁴/K).
+        let slope = rho(100.0) - rho(99.0);
+        (rho(100.0) + slope * (c - 100.0)) as f32
+    }
 }
 
 /// Interfacial tension between two different liquids, N/m (between a liquid
@@ -294,6 +320,107 @@ pub fn interfacial_tension(a: Liquid, b: Liquid) -> f32 {
 /// every interface between two liquids, come out right.
 pub fn work_of_adhesion(a: Liquid, b: Liquid) -> f32 {
     a.surface_tension() + b.surface_tension() - interfacial_tension(a, b)
+}
+
+/// Water's phase change: saturation (boiling point vs pressure), latent
+/// heat, and vapor. Used for boiling, evaporation, and condensation.
+pub mod water {
+    /// Molar mass of water, kg/mol.
+    pub const MOLAR_MASS: f32 = 0.018_015;
+    /// Gas constant, J/(mol·K).
+    pub const GAS_CONSTANT: f32 = 8.314_462;
+    /// Triple point: below this pressure liquid water can't exist, Pa.
+    pub const TRIPLE_PRESSURE: f32 = 611.657;
+    /// One standard atmosphere, Pa.
+    pub const ATMOSPHERE: f32 = 101_325.0;
+    /// Density of dry air at 20 °C and 1 atm, kg/m³.
+    pub const AIR_DENSITY: f32 = 1.204;
+    /// Specific heat of air, J/(kg·K).
+    pub const AIR_SPECIFIC_HEAT: f32 = 1005.0;
+
+    /// IAPWS-IF97 region 4 (the saturation line) coefficients.
+    const N: [f64; 10] = [
+        0.116_705_214_527_67e4,
+        -0.724_213_167_032_06e6,
+        -0.170_738_469_400_92e2,
+        0.120_208_247_024_70e5,
+        -0.323_255_503_223_33e7,
+        0.149_151_086_135_30e2,
+        -0.482_326_573_615_91e4,
+        0.405_113_405_420_57e6,
+        -0.238_555_575_678_49,
+        0.650_175_348_447_98e3,
+    ];
+
+    /// Saturation vapor pressure of pure water at `t` (K), Pa: where it
+    /// boils at that temperature. IAPWS-IF97's saturation equation, the
+    /// industrial steam-table standard (611 Pa at 0 °C, 2.34 kPa at 20 °C,
+    /// 101.42 kPa at 100 °C, valid to the critical point).
+    pub fn saturation_pressure(t: f32) -> f32 {
+        let t = f64::from(t).clamp(273.15, 647.096);
+        let theta = t + N[8] / (t - N[9]);
+        let a = theta * theta + N[0] * theta + N[1];
+        let b = N[2] * theta * theta + N[3] * theta + N[4];
+        let c = N[5] * theta * theta + N[6] * theta + N[7];
+        let p_mpa = (2.0 * c / (-b + (b * b - 4.0 * a * c).sqrt())).powi(4);
+        (p_mpa * 1e6) as f32
+    }
+
+    /// Boiling point of pure water at pressure `p` (Pa), K: the inverse of
+    /// [`saturation_pressure`] (IAPWS-IF97's backward equation). Never
+    /// below the triple point (0.01 °C).
+    pub fn saturation_temperature(p: f32) -> f32 {
+        let p_mpa = f64::from(p.max(TRIPLE_PRESSURE)).min(22.064e6) / 1e6;
+        let beta = p_mpa.powf(0.25);
+        let e = beta * beta + N[2] * beta + N[5];
+        let f = N[0] * beta * beta + N[3] * beta + N[6];
+        let g = N[1] * beta * beta + N[4] * beta + N[7];
+        let d = 2.0 * g / (-f - (f * f - 4.0 * e * g).sqrt());
+        let t = 0.5 * (N[9] + d - ((N[9] + d) * (N[9] + d) - 4.0 * (N[8] + N[9] * d)).sqrt());
+        t.max(273.16) as f32
+    }
+
+    /// Water activity of brine at `salinity` (kg salt per kg): the factor
+    /// salt lowers the vapor pressure by (0.98 for seawater). Two ions per
+    /// NaCl, osmotic coefficient 0.9.
+    pub fn activity(salinity: f32) -> f32 {
+        let s = salinity.clamp(0.0, 0.5);
+        let molality = s / (0.058_44 * (1.0 - s));
+        (-0.9 * 2.0 * molality * MOLAR_MASS).exp()
+    }
+
+    /// Latent heat of vaporization at `t` (K), J/kg: 2.257 MJ at 100 °C,
+    /// 2.45 MJ at 20 °C (Watson's correlation, zero at the critical point).
+    pub fn latent_heat(t: f32) -> f32 {
+        let t = t.clamp(273.15, 647.0);
+        2.257e6 * ((647.1 - t) / (647.1 - 373.15)).max(0.0).powf(0.38)
+    }
+
+    /// Density of water vapor at partial pressure `p` (Pa) and `t` (K),
+    /// kg/m³ (ideal gas).
+    pub fn vapor_density(p: f32, t: f32) -> f32 {
+        p * MOLAR_MASS / (GAS_CONSTANT * t.max(1.0))
+    }
+
+    /// Partial pressure of vapor at density `rho` (kg/m³) and `t` (K), Pa.
+    pub fn vapor_pressure(rho: f32, t: f32) -> f32 {
+        rho * GAS_CONSTANT * t.max(1.0) / MOLAR_MASS
+    }
+
+    /// Vapor density in air saturated at `t` (K), kg/m³: 17.3 g/m³ at
+    /// 20 °C, 0.598 kg/m³ (pure steam) at 100 °C.
+    pub fn saturation_vapor_density(t: f32) -> f32 {
+        vapor_density(saturation_pressure(t), t)
+    }
+
+    /// Hertz–Knudsen: the most a surface at `t` (K) can evaporate into
+    /// vacuum, kg/(m²·s), with evaporation coefficient 0.1 (measured values
+    /// for water run from about 0.04 to 1).
+    pub fn vacuum_evaporation_flux(t: f32, activity: f32) -> f32 {
+        let p = saturation_pressure(t) * activity;
+        let m = MOLAR_MASS;
+        0.1 * p * (m / (2.0 * std::f32::consts::PI * GAS_CONSTANT * t.max(1.0))).sqrt()
+    }
 }
 
 #[cfg(test)]
@@ -347,5 +474,39 @@ mod tests {
             serde_json::to_string(&Liquid::Mercury).unwrap(),
             "\"mercury\""
         );
+    }
+
+    #[test]
+    fn water_saturation_is_real() {
+        use water::*;
+        let at = |c: f32| saturation_pressure(c + 273.15);
+        assert!((at(0.01) / 611.66 - 1.0).abs() < 0.002, "{}", at(0.01));
+        assert!((at(20.0) / 2339.2 - 1.0).abs() < 0.002, "{}", at(20.0));
+        assert!((at(100.0) / 101_418.0 - 1.0).abs() < 0.001, "{}", at(100.0));
+        assert!((at(200.0) / 1.5549e6 - 1.0).abs() < 0.001, "{}", at(200.0));
+        // Boiling point vs pressure: Denver (83.4 kPa) boils at 94.4 °C.
+        let boil = |p: f32| saturation_temperature(p) - 273.15;
+        assert!((boil(101_325.0) - 99.97).abs() < 0.02);
+        assert!((boil(83_400.0) - 94.4).abs() < 0.3, "{}", boil(83_400.0));
+        // IF97 verification values: 0.1 MPa -> 372.756 K, 1 MPa -> 453.036 K.
+        assert!(
+            (boil(100_000.0) - 99.606).abs() < 0.005,
+            "{}",
+            boil(100_000.0)
+        );
+        assert!(
+            (boil(1.0e6) + 273.15 - 453.036).abs() < 0.01,
+            "{}",
+            boil(1.0e6)
+        );
+        assert!((boil(0.0) - 0.01).abs() < 0.01);
+        for c in [5.0, 30.0, 60.0, 99.0, 150.0] {
+            let back = boil(at(c));
+            assert!((back - c).abs() < 0.05, "{c} -> {back}");
+        }
+        assert!((latent_heat(373.15) - 2.257e6).abs() < 1.0);
+        assert!((latent_heat(293.15) / 2.454e6 - 1.0).abs() < 0.02);
+        assert!((saturation_vapor_density(293.15) * 1000.0 - 17.3).abs() < 0.3);
+        assert!((activity(0.035) - 0.98).abs() < 0.003);
     }
 }
