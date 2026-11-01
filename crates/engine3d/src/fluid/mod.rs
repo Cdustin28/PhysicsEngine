@@ -40,7 +40,7 @@ use boundary::Boundary;
 use glam::Vec3;
 use grid::NeighborGrid;
 use kernel::{CubicSpline, cohesion_normalization, cohesion_shape};
-pub use materials::{Liquid, LiquidSpec, ROOM_TEMPERATURE, SEAWATER_SALINITY};
+pub use materials::{Liquid, LiquidSpec, ROOM_TEMPERATURE, SEAWATER_SALINITY, water};
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "parallel")]
@@ -413,6 +413,12 @@ pub struct Fluid {
     /// temperature (and missing entries mean room temperature).
     #[serde(default, skip_serializing_if = "all_room_temperature")]
     pub temperatures: Vec<f64>,
+    /// How much of each particle has evaporated or boiled away, as a
+    /// fraction of its mass (negative: vapor has condensed onto it). A
+    /// particle is removed when all of it is gone, and a new one appears
+    /// when a whole particle's worth has condensed. Omitted when all zero.
+    #[serde(default, skip_serializing_if = "all_fresh")]
+    pub evaporated: Vec<f32>,
     #[serde(skip)]
     scratch: Scratch,
     #[serde(skip)]
@@ -443,6 +449,7 @@ impl PartialEq for Fluid {
         let liquid = |f: &Fluid, i: usize| f.liquids.get(i).copied().unwrap_or_default();
         let salt = |f: &Fluid, i: usize| f.salinity.get(i).copied().unwrap_or(0.0);
         let temp = |f: &Fluid, i: usize| f.temperature(i);
+        let gone = |f: &Fluid, i: usize| f.evaporated.get(i).copied().unwrap_or(0.0);
         self.params == other.params
             && self.positions == other.positions
             && (0..self.positions.len()).all(|i| {
@@ -450,6 +457,7 @@ impl PartialEq for Fluid {
                     && liquid(self, i) == liquid(other, i)
                     && salt(self, i) == salt(other, i)
                     && temp(self, i) == temp(other, i)
+                    && gone(self, i) == gone(other, i)
             })
     }
 }
@@ -497,6 +505,7 @@ impl Fluid {
         self.liquids.clear();
         self.salinity.clear();
         self.temperatures.clear();
+        self.evaporated.clear();
         self.stats = FluidStats::default();
     }
 
@@ -508,6 +517,7 @@ impl Fluid {
         self.liquids.resize(n, Liquid::Water);
         self.salinity.resize(n, 0.0);
         self.temperatures.resize(n, f64::from(ROOM_TEMPERATURE));
+        self.evaporated.resize(n, 0.0);
     }
 
     /// True if particle `i` was at a free surface in the last step (its
@@ -631,6 +641,15 @@ impl Fluid {
                 self.temperatures.len()
             ));
         }
+        if !self.evaporated.is_empty() && self.evaporated.len() != n {
+            return Err(format!(
+                "fluid has {n} positions but {} evaporated fractions",
+                self.evaporated.len()
+            ));
+        }
+        if !self.evaporated.iter().all(|f| f.is_finite()) {
+            return Err("evaporated fractions must be finite".into());
+        }
         if !self.temperatures.iter().all(|t| t.is_finite() && *t > 0.0) {
             return Err("temperatures must be positive (kelvin)".into());
         }
@@ -700,6 +719,7 @@ impl Fluid {
                         self.liquids.push(liquid);
                         self.salinity.push(salinity);
                         self.temperatures.push(f64::from(temperature));
+                        self.evaporated.push(0.0);
                     }
                 }
             }
@@ -797,6 +817,7 @@ impl Fluid {
                 self.liquids[w] = self.liquids[r];
                 self.salinity[w] = self.salinity[r];
                 self.temperatures[w] = self.temperatures[r];
+                self.evaporated[w] = self.evaporated[r];
                 w += 1;
             }
         }
@@ -805,6 +826,7 @@ impl Fluid {
         self.liquids.truncate(w);
         self.salinity.truncate(w);
         self.temperatures.truncate(w);
+        self.evaporated.truncate(w);
         before - w
     }
 
@@ -957,6 +979,7 @@ impl Fluid {
                 self.liquids.swap(i, j);
                 self.salinity.swap(i, j);
                 self.temperatures.swap(i, j);
+                self.evaporated.swap(i, j);
                 taken[i] = true;
                 taken[j] = true;
             }
@@ -1064,6 +1087,7 @@ impl Fluid {
     /// over the arrays. It costs little, doesn't change the physics, and
     /// matters once the particle count outgrows the CPU cache.
     pub fn sort_spatially(&mut self) {
+        self.fill_missing_velocities();
         let inv = 1.0 / self.params.support();
         let key = |p: Vec3| {
             let c = (p * inv).floor();
@@ -1079,6 +1103,7 @@ impl Fluid {
             .iter()
             .map(|&i| self.temperatures[i as usize])
             .collect();
+        self.evaporated = order.iter().map(|&i| self.evaporated[i as usize]).collect();
     }
 
     /// One substep. Three parallel passes over the particles, so threads
@@ -1340,7 +1365,7 @@ impl Fluid {
                         // convection coefficient h as a conductivity h·Δx.
                         let liquid = Liquid::ALL[pi.liquid as usize];
                         let h_conv =
-                            liquid.natural_convection(pi.salinity, pi.temperature as f32, tw);
+                            liquid.wall_heat_transfer(pi.salinity, pi.temperature as f32, tw);
                         let k_wall = pi.k.max(h_conv * spacing * WALL_FILM);
                         heat += 2.0 * k_wall * w * v0 * diff * rg / (dist * dist + eps);
                     }
@@ -1473,6 +1498,70 @@ impl Fluid {
     }
 
     /// Total mass of each liquid, kg, indexed by [`Liquid::index`].
+    /// Add one particle (velocities, liquids, etc. must be filled in;
+    /// [`Self::fill_missing_velocities`] does that).
+    pub fn push_particle(
+        &mut self,
+        position: Vec3,
+        velocity: Vec3,
+        liquid: Liquid,
+        salinity: f32,
+        temperature: f64,
+    ) {
+        self.fill_missing_velocities();
+        self.positions.push(position);
+        self.velocities.push(velocity);
+        self.liquids.push(liquid);
+        self.salinity.push(salinity);
+        self.temperatures.push(temperature);
+        self.evaporated.push(0.0);
+    }
+
+    /// Remove the particles at `indices` (in any order).
+    pub fn remove_particles(&mut self, indices: &[usize]) {
+        if indices.is_empty() {
+            return;
+        }
+        let mut drop = vec![false; self.len()];
+        for &i in indices {
+            if let Some(d) = drop.get_mut(i) {
+                *d = true;
+            }
+        }
+        self.fill_missing_velocities();
+        let mut w = 0;
+        for (r, &dropped) in drop.iter().enumerate() {
+            if !dropped {
+                self.positions[w] = self.positions[r];
+                self.velocities[w] = self.velocities[r];
+                self.liquids[w] = self.liquids[r];
+                self.salinity[w] = self.salinity[r];
+                self.temperatures[w] = self.temperatures[r];
+                self.evaporated[w] = self.evaporated[r];
+                w += 1;
+            }
+        }
+        self.positions.truncate(w);
+        self.velocities.truncate(w);
+        self.liquids.truncate(w);
+        self.salinity.truncate(w);
+        self.temperatures.truncate(w);
+        self.evaporated.truncate(w);
+    }
+
+    /// Mass of liquid left in particle `i` (less what has evaporated), kg.
+    pub fn liquid_mass(&self, i: usize) -> f32 {
+        self.mass(i) * (1.0 - self.evaporated.get(i).copied().unwrap_or(0.0))
+    }
+
+    /// Total liquid water (fresh and salt), kg.
+    pub fn water_mass(&self) -> f32 {
+        (0..self.len())
+            .filter(|&i| self.liquid(i) == Liquid::Water)
+            .map(|i| self.liquid_mass(i))
+            .sum()
+    }
+
     /// True if the GPU solver can step this fluid: fresh water, all at one
     /// temperature, with no wall temperature (its shaders don't carry
     /// heat or more than one liquid yet).

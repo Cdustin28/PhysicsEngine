@@ -8,6 +8,7 @@
 use crate::body::RigidBody;
 use crate::broad_phase::Aabb;
 use glam::Vec3;
+use materials::water;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -24,6 +25,10 @@ pub struct GasParams {
     /// 1/s
     pub cooling: f32,
     pub open_top: bool,
+    /// Relative humidity of the surrounding air (0–1): the vapor a new grid
+    /// starts with. Zero leaves water vapor out entirely.
+    #[serde(default)]
+    pub humidity: f32,
     /// How often the world steps the gas, Hz. Smoke doesn't need the rigid
     /// bodies' 120 Hz, and its solver is stable at large steps, so the
     /// world steps it less often (with a correspondingly longer step).
@@ -44,6 +49,7 @@ impl Default for GasParams {
             smoke_decay: 0.0,
             cooling: 0.0,
             open_top: true,
+            humidity: 0.0,
             step_hz: default_gas_hz(),
         }
     }
@@ -89,6 +95,12 @@ pub struct Gas {
     /// Temperature above ambient, K.
     #[serde(default, skip_serializing_if = "all_zero")]
     pub heat: Vec<f32>,
+    /// Water vapor, kg/m³ (invisible, like real steam).
+    #[serde(default, skip_serializing_if = "all_zero")]
+    pub vapor: Vec<f32>,
+    /// Condensed droplets (mist, fog: the visible part of "steam"), kg/m³.
+    #[serde(default, skip_serializing_if = "all_zero")]
+    pub fog: Vec<f32>,
     #[serde(skip)]
     solid: Vec<bool>,
     #[serde(skip)]
@@ -115,6 +127,8 @@ impl PartialEq for Gas {
             && self.w == other.w
             && self.smoke == other.smoke
             && self.heat == other.heat
+            && self.vapor == other.vapor
+            && self.fog == other.fog
     }
 }
 
@@ -151,6 +165,8 @@ impl Gas {
             w: Vec::new(),
             smoke: Vec::new(),
             heat: Vec::new(),
+            vapor: Vec::new(),
+            fog: Vec::new(),
             solid: Vec::new(),
             solid_velocity: Vec::new(),
             pressure: Vec::new(),
@@ -168,6 +184,9 @@ impl Gas {
         self.w.resize(nx * ny * (nz + 1), 0.0);
         self.smoke.resize(n, 0.0);
         self.heat.resize(n, 0.0);
+        let ambient = self.ambient_vapor();
+        self.vapor.resize(n, ambient);
+        self.fog.resize(n, 0.0);
         self.solid.resize(n, false);
         self.solid_velocity.resize(n, Vec3::ZERO);
         self.pressure.resize(n, 0.0);
@@ -187,7 +206,9 @@ impl Gas {
             && sized(&self.v, nx * (ny + 1) * nz)
             && sized(&self.w, nx * ny * (nz + 1))
             && sized(&self.smoke, n)
-            && sized(&self.heat, n))
+            && sized(&self.heat, n)
+            && sized(&self.vapor, n)
+            && sized(&self.fog, n))
         {
             return Err("gas field sizes don't match the grid".into());
         }
@@ -233,6 +254,70 @@ impl Gas {
         )
     }
 
+    /// Vapor density of the surrounding air, kg/m³.
+    pub fn ambient_vapor(&self) -> f32 {
+        let p = &self.params;
+        p.humidity.clamp(0.0, 1.0) * water::saturation_vapor_density(p.ambient_temperature)
+    }
+
+    /// Set the surrounding air's relative humidity (0–1) and fill the grid
+    /// with air that humid.
+    pub fn set_humidity(&mut self, humidity: f32) {
+        self.params.humidity = humidity.clamp(0.0, 1.0);
+        self.fill_missing();
+        let ambient = self.ambient_vapor();
+        self.vapor.iter_mut().for_each(|v| *v = ambient);
+    }
+
+    /// Water vapor in the grid, kg.
+    pub fn total_vapor(&self) -> f32 {
+        self.vapor.iter().sum::<f32>() * self.cell.powi(3)
+    }
+
+    /// Mist (condensed droplets) in the grid, kg.
+    pub fn total_fog(&self) -> f32 {
+        self.fog.iter().sum::<f32>() * self.cell.powi(3)
+    }
+
+    /// Temperature of cell `c`, K.
+    pub fn temperature(&self, c: usize) -> f32 {
+        self.params.ambient_temperature + self.heat.get(c).copied().unwrap_or(0.0)
+    }
+
+    /// The cell holding `p`, if it's inside the grid.
+    pub fn cell_at(&self, p: Vec3) -> Option<usize> {
+        let rel = (p - self.origin) / self.cell;
+        if rel.min_element() < 0.0 {
+            return None;
+        }
+        let (i, j, k) = (rel.x as usize, rel.y as usize, rel.z as usize);
+        (i < self.nx && j < self.ny && k < self.nz).then(|| self.idx(i, j, k))
+    }
+
+    /// Fill a ball with pure steam at `temperature` (K): air displaced by
+    /// water vapor at the saturation density for that temperature at 1 atm
+    /// (0.598 kg/m³ at 100 °C). Returns the vapor added, kg.
+    pub fn add_steam(&mut self, center: Vec3, radius: f32, temperature: f32) -> f32 {
+        self.fill_missing();
+        let t = temperature.max(water::saturation_temperature(water::ATMOSPHERE));
+        let rho = water::vapor_density(water::ATMOSPHERE, t);
+        let dt = t - self.params.ambient_temperature;
+        let mut added = 0.0;
+        for k in 0..self.nz {
+            for j in 0..self.ny {
+                for i in 0..self.nx {
+                    let c = self.idx(i, j, k);
+                    if !self.solid[c] && (self.cell_center(i, j, k) - center).length() <= radius {
+                        added += (rho - self.vapor[c]).max(0.0);
+                        self.vapor[c] = self.vapor[c].max(rho);
+                        self.heat[c] = self.heat[c].max(dt);
+                    }
+                }
+            }
+        }
+        added * self.cell.powi(3)
+    }
+
     pub fn total_heat(&self) -> f32 {
         self.heat.iter().sum::<f32>() * self.cell.powi(3)
     }
@@ -262,9 +347,12 @@ impl Gas {
             &mut self.w,
             &mut self.smoke,
             &mut self.heat,
+            &mut self.fog,
         ] {
             f.iter_mut().for_each(|x| *x = 0.0);
         }
+        let ambient = self.ambient_vapor();
+        self.vapor.iter_mut().for_each(|x| *x = ambient);
     }
 
     pub fn step(&mut self, bodies: &[RigidBody], gravity: Vec3, dt: f32) {
@@ -285,6 +373,7 @@ impl Gas {
             self.advect_velocity(h);
             self.diffuse_heat(h);
             self.advect_scalars(h);
+            self.saturate();
             self.decay(h);
             self.project(h);
         }
@@ -356,7 +445,14 @@ impl Gas {
     fn apply_buoyancy(&mut self, gravity: Vec3, h: f32) {
         let beta = 1.0 / self.params.ambient_temperature;
         let alpha = self.params.smoke_weight;
-        let b = |g: &Gas, c: usize| beta * g.heat[c] - alpha * g.smoke[c];
+        // Moist air is lighter than dry (water's molar mass is 0.62 of
+        // air's: virtual temperature), and mist weighs the air down.
+        let ambient_vapor = self.ambient_vapor();
+        let moist = 0.608 / water::AIR_DENSITY;
+        let b = |g: &Gas, c: usize| {
+            beta * g.heat[c] - alpha * g.smoke[c] + moist * (g.vapor[c] - ambient_vapor)
+                - g.fog[c] / water::AIR_DENSITY
+        };
         let (nx, ny, nz) = (self.nx, self.ny, self.nz);
         for k in 0..nz {
             for j in 0..ny {
@@ -526,6 +622,22 @@ impl Gas {
             this.backtrace(Vec3::new(i as f32, j as f32, k as f32) + off, h)
         });
         let (mut smoke, mut heat) = (self.smoke.clone(), self.heat.clone());
+        let (mut vapor, mut fog) = (self.vapor.clone(), self.fog.clone());
+        fill32(&mut vapor, |c| {
+            if this.solid[c] {
+                this.vapor[c]
+            } else {
+                Self::sample(&this.vapor, nx, ny, nz, off, points[c])
+            }
+        });
+        fill32(&mut fog, |c| {
+            if this.solid[c] {
+                this.fog[c]
+            } else {
+                Self::sample(&this.fog, nx, ny, nz, off, points[c])
+            }
+        });
+
         fill32(&mut smoke, |c| {
             if this.solid[c] {
                 this.smoke[c]
@@ -542,6 +654,39 @@ impl Gas {
         });
         self.smoke = smoke;
         self.heat = heat;
+        self.vapor = vapor;
+        self.fog = fog;
+    }
+
+    /// Vapor beyond what the air can hold at its temperature condenses to
+    /// mist, releasing latent heat; mist in air that can hold more
+    /// evaporates, taking it back. One saturation adjustment per substep,
+    /// linearized so the latent heat's own warming is accounted for.
+    fn saturate(&mut self) {
+        let gamma_base = 1.0 / (water::AIR_DENSITY * water::AIR_SPECIFIC_HEAT);
+        let ambient = self.params.ambient_temperature;
+        for c in 0..self.vapor.len() {
+            if self.solid[c] {
+                continue;
+            }
+            let t = ambient + self.heat[c];
+            let rho_s = water::saturation_vapor_density(t);
+            let excess = self.vapor[c] - rho_s;
+            if excess <= 0.0 && self.fog[c] <= 0.0 {
+                continue;
+            }
+            let l = water::latent_heat(t);
+            let gamma = l * gamma_base;
+            // dρs/dT from Clausius–Clapeyron for an ideal gas.
+            let slope = rho_s * (l * water::MOLAR_MASS / (water::GAS_CONSTANT * t * t) - 1.0 / t);
+            let mut dm = excess / (1.0 + gamma * slope);
+            if dm < 0.0 {
+                dm = dm.max(-self.fog[c]);
+            }
+            self.vapor[c] -= dm;
+            self.fog[c] += dm;
+            self.heat[c] += gamma * dm;
+        }
     }
 
     fn decay(&mut self, h: f32) {

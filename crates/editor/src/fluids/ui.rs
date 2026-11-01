@@ -4,7 +4,9 @@ use super::{
     BOX_BODIES, ColorBy, Environment, FluidsEditor, Grab, SPACINGS, SolidMaterial, SolidShape,
     Tool, celsius, graph::format_energy, pick_particle, ray_plane,
 };
-use crate::view3d::render::{BodyCallback, CameraView, Instance, SoftMeshes, SurfaceFrame};
+use crate::view3d::render::{
+    BodyCallback, CameraView, Instance, SoftMeshes, SplatInstance, SurfaceFrame,
+};
 use crate::view3d::surface::{SurfaceView, particles_colored};
 use eframe::egui::{self, Color32, PointerButton, Pos2, Rect, Sense, Stroke, Ui};
 use engine3d::fluid::Liquid;
@@ -157,6 +159,11 @@ impl FluidsEditor {
                     "Probe (I)",
                     "Hover to read the liquid; click to pin",
                 ),
+                (
+                    Tool::Steam,
+                    "Steam (S)",
+                    "Click: a puff of steam into the air",
+                ),
             ] {
                 ui.selectable_value(&mut self.tool, tool, label)
                     .on_hover_text(hint);
@@ -221,14 +228,17 @@ impl FluidsEditor {
                     ui.label("Temperature");
                     ui.add(
                         egui::DragValue::new(&mut s.plate_celsius)
-                            .range(-20.0..=99.0)
+                            .range(-20.0..=250.0)
                             .speed(0.5)
                             .suffix(" °C"),
                     );
                 });
                 ui.weak(
                     "Heats or cools the liquid touching it by natural convection \
-                     (about 1 kW/m²·K for water). Up to 99 °C until boiling is in.",
+                     (about 1 kW/m²·K for water), or above 100 °C by nucleate boiling \
+                     (up to the critical heat flux, 1.26 MW/m²). Water boils at 100 °C \
+                     in air, near room temperature in vacuum. Oil stops at its 230 °C \
+                     smoke point.",
                 );
             }
             Tool::Heat => {
@@ -254,6 +264,23 @@ impl FluidsEditor {
                     self.probe_pin = None;
                 }
             }
+            Tool::Steam => {
+                ui.horizontal(|ui| {
+                    ui.label("Temperature");
+                    ui.add(
+                        egui::DragValue::new(&mut s.steam_celsius)
+                            .range(100.0..=200.0)
+                            .speed(0.5)
+                            .suffix(" °C"),
+                    );
+                });
+                length_row(ui, "Radius", &mut s.steam_radius, 0.03..=0.4);
+                ui.weak(
+                    "Pure water vapor at 1 atm (0.6 kg/m³ at 100 °C). It rises, mixes \
+                     with the room air, and condenses into mist (drawn white) where it \
+                     cools past its dew point, warming the air with its latent heat.",
+                );
+            }
         }
     }
 
@@ -264,7 +291,10 @@ impl FluidsEditor {
             ui.selectable_value(&mut env, Environment::Air, "Air, 1 atm, 20 °C")
                 .on_hover_text("Room air above the liquid: it takes heat off the surface");
             ui.selectable_value(&mut env, Environment::Vacuum, "Vacuum")
-                .on_hover_text("Nothing above the liquid: no heat leaves the surface");
+                .on_hover_text(
+                    "Nothing above the liquid: no heat leaves by convection, and water \
+                     boils until it cools to near freezing",
+                );
         });
         if env != self.settings.environment {
             self.set_environment(env);
@@ -277,11 +307,27 @@ impl FluidsEditor {
             ui.add_enabled(
                 hold,
                 egui::DragValue::new(&mut wall)
-                    .range(-20.0..=99.0)
+                    .range(-20.0..=250.0)
                     .speed(0.5)
                     .suffix(" °C"),
             );
         });
+        if self.settings.environment == Environment::Air {
+            let mut rh = self.settings.humidity * 100.0;
+            ui.horizontal(|ui| {
+                ui.label("Humidity");
+                if ui
+                    .add(egui::Slider::new(&mut rh, 0.0..=100.0).suffix(" %"))
+                    .on_hover_text("Relative humidity of the room air (refills the box with it)")
+                    .changed()
+                {
+                    self.settings.humidity = rh / 100.0;
+                    if let Some(g) = self.world.gas.as_mut() {
+                        g.set_humidity(self.settings.humidity);
+                    }
+                }
+            });
+        }
         if hold != self.settings.hold_walls || wall != self.settings.wall_celsius {
             self.settings.hold_walls = hold;
             self.settings.wall_celsius = wall;
@@ -392,13 +438,20 @@ impl FluidsEditor {
                     ui.label(format!("{:.2} °C", celsius(p.temperature)));
                     ui.end_row();
                     ui.label("Pressure");
-                    let absolute = p.pressure + self.settings.environment.pressure();
+                    let absolute = p.pressure + self.world.ambient_pressure;
                     ui.label(format!("{:.2} kPa", absolute / 1000.0))
                         .on_hover_text(format!(
                             "Absolute; {:.0} Pa above the surroundings",
                             p.pressure
                         ));
                     ui.end_row();
+                    if p.liquid == Liquid::Water {
+                        let boil = materials_boiling_point(absolute);
+                        ui.label("Boils at");
+                        ui.label(format!("{:.1} °C", celsius(boil)))
+                            .on_hover_text("Fresh water's boiling point at this pressure");
+                        ui.end_row();
+                    }
                     ui.label("Density");
                     ui.label(format!("{:.0} kg/m³", p.density));
                     ui.end_row();
@@ -420,8 +473,44 @@ impl FluidsEditor {
 
         ui.heading("Totals");
         let fluid = &self.world.fluid;
-        let masses = fluid.mass_by_liquid();
+        let mut masses = fluid.mass_by_liquid();
+        masses[Liquid::Water.index()] = fluid.water_mass();
+        let budget = &self.world.water;
+        let (vapor, mist) = self.world.gas.as_ref().map_or((0.0, 0.0), |g| {
+            let room = g.ambient_vapor() * g.size().element_product();
+            (g.total_vapor() - room, g.total_fog())
+        });
         egui::Grid::new("totals").num_columns(2).show(ui, |ui| {
+            for (label, kg, hint) in [
+                (
+                    "Steam (vapor)",
+                    vapor,
+                    "Water vapor in the box beyond the room air's own humidity",
+                ),
+                ("Mist", mist, "Condensed droplets in the air"),
+                (
+                    "Dew",
+                    budget.total_dew(),
+                    "Condensed on cold surfaces, not yet a drop",
+                ),
+                (
+                    "Boiled off",
+                    budget.vented,
+                    "Vapor that escaped (into vacuum)",
+                ),
+            ] {
+                if kg.abs() > 1e-6 {
+                    ui.label(label).on_hover_text(hint);
+                    ui.label(format!("{:.1} g", kg * 1000.0));
+                    ui.end_row();
+                }
+            }
+            if budget.latent.abs() > 1e-3 {
+                ui.label("Latent heat")
+                    .on_hover_text("Taken from the liquid to evaporate or boil it (net)");
+                ui.label(format_energy(budget.latent));
+                ui.end_row();
+            }
             for liquid in Liquid::ALL {
                 let m = masses[liquid.index()];
                 if m > 0.0 {
@@ -466,7 +555,7 @@ impl FluidsEditor {
                 ui.label("Temperature");
                 ui.add(
                     egui::DragValue::new(&mut c)
-                        .range(-20.0..=99.0)
+                        .range(-20.0..=250.0)
                         .speed(0.5)
                         .suffix(" °C"),
                 );
@@ -524,7 +613,7 @@ impl FluidsEditor {
         match self.tool {
             Tool::Select => self.select_input(ui, &response, rect),
             Tool::Block => self.block_input(&response, rect),
-            Tool::Ball | Tool::Solid | Tool::Plate => {
+            Tool::Ball | Tool::Solid | Tool::Plate | Tool::Steam => {
                 if response.clicked_by(PointerButton::Primary)
                     && let Some(p) = response.interact_pointer_pos()
                     && let Some(at) = self.floor_point(rect, p)
@@ -532,6 +621,7 @@ impl FluidsEditor {
                     match self.tool {
                         Tool::Ball => self.drop_ball(at),
                         Tool::Solid => self.drop_solid(at),
+                        Tool::Steam => self.puff_steam(at),
                         _ => self.place_plate(at),
                     }
                 }
@@ -801,14 +891,16 @@ impl FluidsEditor {
             spheres,
             particles,
             SoftMeshes::default(),
-            Vec::new(),
+            self.mist_splats(),
             CameraView {
                 view_proj: self.camera.view_proj(rect),
                 eye: self.camera.eye(),
                 right,
                 up,
             },
-        );
+        )
+        // Mist lightens what's behind it.
+        .with_glowing_splats(true);
         if smooth {
             let radius = 0.9 * fluid.params.particle_spacing;
             let sky = crate::theme::sky(dark);
@@ -981,4 +1073,38 @@ fn length_row(ui: &mut Ui, label: &str, value: &mut f32, range: std::ops::RangeI
                 .suffix(" m"),
         );
     });
+}
+
+/// Fresh water's boiling point at pressure `p` (Pa), K.
+fn materials_boiling_point(p: f32) -> f32 {
+    engine3d::fluid::water::saturation_temperature(p)
+}
+
+impl FluidsEditor {
+    /// Mist in the air as soft white splats, one per cell, as opaque as
+    /// the droplets make that much air (about 300 m² of cross-section per
+    /// kg of 10 µm droplets).
+    fn mist_splats(&self) -> Vec<SplatInstance> {
+        let Some(g) = self.world.gas.as_ref() else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for k in 0..g.nz {
+            for j in 0..g.ny {
+                for i in 0..g.nx {
+                    let fog = g.fog.get(g.idx(i, j, k)).copied().unwrap_or(0.0);
+                    if fog <= 1e-5 {
+                        continue;
+                    }
+                    let opacity = 1.0 - (-300.0 * fog * g.cell).exp();
+                    out.push(SplatInstance {
+                        position: g.cell_center(i, j, k).to_array(),
+                        size: 1.2 * g.cell,
+                        color: [0xF4, 0xF6, 0xF8, (opacity * 255.0) as u8],
+                    });
+                }
+            }
+        }
+        out
+    }
 }
