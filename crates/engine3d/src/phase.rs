@@ -79,6 +79,7 @@ pub fn step(
     fluid: &mut Fluid,
     mut gas: Option<&mut Gas>,
     bodies: &[RigidBody],
+    gravity: Vec3,
     ambient_pressure: f32,
     wall_temperature: Option<f32>,
     budget: &mut WaterBudget,
@@ -95,7 +96,7 @@ pub fn step(
     fluid.fill_missing_velocities();
     let d = fluid.params.particle_spacing;
     let area = d * d;
-    let pressures: Vec<f32> = fluid.pressures().to_vec();
+    let pressures = hydrostatic_pressures(fluid, gravity);
     let surface: Vec<bool> = (0..fluid.len()).map(|i| fluid.is_surface(i)).collect();
 
     // The top of the liquid over each air column, where vapor from boiling
@@ -120,7 +121,7 @@ pub fn step(
             }
         } else {
             let a = water::activity(s);
-            let p_local = ambient_pressure + pressures.get(i).copied().unwrap_or(0.0).max(0.0);
+            let p_local = ambient_pressure + pressures[i];
             // Salt lowers the vapor pressure by a, so brine boils where
             // a · p_sat(T) reaches the pressure.
             let t_sat = water::saturation_temperature(p_local / a);
@@ -188,6 +189,44 @@ pub fn step(
         }
     }
     settle_evaporated(fluid);
+}
+
+/// The pressure of the liquid above each particle, Pa: the weight of the
+/// particles stacked over it in its column (one particle spacing square),
+/// plus half its own, per unit area. Unlike the SPH pressure this is right
+/// from the first step (SPH pressure only builds up as the liquid
+/// compresses under its weight) and doesn't carry the solver's noise.
+fn hydrostatic_pressures(fluid: &Fluid, gravity: Vec3) -> Vec<f32> {
+    let g = gravity.length();
+    let up = if g > 0.0 { -gravity / g } else { Vec3::Y };
+    let d = fluid.params.particle_spacing;
+    // Columns: horizontal cells one spacing across.
+    let side = up.any_orthonormal_vector();
+    let other = up.cross(side);
+    let mut columns: std::collections::HashMap<(i32, i32), Vec<usize>> =
+        std::collections::HashMap::new();
+    for (i, &p) in fluid.positions.iter().enumerate() {
+        let key = (
+            (p.dot(side) / d).floor() as i32,
+            (p.dot(other) / d).floor() as i32,
+        );
+        columns.entry(key).or_default().push(i);
+    }
+    let mut out = vec![0.0; fluid.len()];
+    for list in columns.values_mut() {
+        list.sort_unstable_by(|&a, &b| {
+            fluid.positions[b]
+                .dot(up)
+                .total_cmp(&fluid.positions[a].dot(up))
+        });
+        let mut above = 0.0;
+        for &i in list.iter() {
+            let m = fluid.liquid_mass(i).max(0.0);
+            out[i] = g * (above + 0.5 * m) / (d * d);
+            above += m;
+        }
+    }
+    out
 }
 
 /// The air column (i, k) above `p`, if it's over the grid.

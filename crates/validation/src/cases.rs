@@ -923,6 +923,358 @@ pub fn kepler() -> Case {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Liquids, heat, and boiling (M12)
+
+pub fn layered_hydrostatics() -> Case {
+    use engine::fluid::Liquid;
+    use engine::{Vec2, World, presets};
+    // 0.3 m of mercury under 0.5 m of water.
+    let mut w = presets::tank(1.0, 2.0);
+    let b = w.bodies.clone();
+    w.fluid.fill_rect_with(
+        Vec2::new(-0.5, 0.0),
+        Vec2::new(0.5, 0.3),
+        &b,
+        Liquid::Mercury,
+        0.0,
+    );
+    w.fluid
+        .fill_rect(Vec2::new(-0.5, 0.3), Vec2::new(0.5, 0.8), &b);
+    for _ in 0..steps(3.0) {
+        w.step(DT);
+    }
+    let g = f64::from(w.gravity.length());
+    let rho_w = f64::from(w.fluid.params.rest_density);
+    let rho_hg = rho_w * 13.546;
+    let band = |w: &World, lo: f32, hi: f32| {
+        let (s, n) = (0..w.fluid.len())
+            .filter(|&i| {
+                let p = w.fluid.positions[i];
+                p.x.abs() < 0.3 && p.y > lo && p.y < hi
+            })
+            .fold((0.0_f64, 0), |(s, n), i| {
+                (s + f64::from(w.fluid.pressures()[i]), n + 1)
+            });
+        s / f64::from(n.max(1))
+    };
+    let edges: Vec<f32> = (0..16).map(|k| 0.05 * k as f32).collect();
+    let mut sums = vec![0.0_f64; edges.len() - 1];
+    let (mut grad_w, mut grad_hg) = (0.0, 0.0);
+    let samples = 240;
+    for _ in 0..samples {
+        w.step(DT);
+        for (k, s) in sums.iter_mut().enumerate() {
+            *s += band(&w, edges[k], edges[k + 1]) / f64::from(samples);
+        }
+        grad_w += (band(&w, 0.45, 0.5) - band(&w, 0.65, 0.7)) / 0.2 / f64::from(samples);
+        grad_hg += (band(&w, 0.12, 0.17) - band(&w, 0.22, 0.27)) / 0.1 / f64::from(samples);
+    }
+    let surface = 0.8;
+    let points: Vec<(f64, f64)> = sums
+        .iter()
+        .enumerate()
+        .map(|(k, &p)| (surface - f64::from(edges[k] + 0.025), p))
+        .collect();
+    let exact = |depth: f64| {
+        if depth <= 0.5 {
+            rho_w * g * depth
+        } else {
+            rho_w * g * 0.5 + rho_hg * g * (depth - 0.5)
+        }
+    };
+    let curve: Vec<(f64, f64)> = (0..=80)
+        .map(|k| (k as f64 * 0.01, exact(k as f64 * 0.01)))
+        .collect();
+    Case {
+        id: "layered",
+        title: "Pressure through two liquids",
+        engine: "2D SPH fluid, several liquids",
+        explanation: "<p>0.3 m of mercury under 0.5 m of water, settled, then pressures averaged over 2 s in \
+             5 cm bands. Pressure grows at ρg in each liquid: 13.5× faster in the mercury. This needs the \
+             multiphase formulation (each particle sums neighbors by number, not mass, so a water particle \
+             beside mercury doesn't count mercury's mass as its own density). Bands at the floor and at the \
+             interface read off: one-sided SPH neighborhoods there.</p>"
+            .into(),
+        chart: Some(
+            Chart::new("Depth below the surface (m)", "Pressure (N/m)")
+                .with(Series::line("ρ_water g h, then ρ_mercury g h", curve, CARDINAL))
+                .with(Series::points("Simulated (band means)", points, GOLD))
+                .svg(),
+        ),
+        checks: vec![
+            check("dp/dh in the water", rho_w * g, grad_w, 0.15, "N/m²"),
+            check("dp/dh in the mercury", rho_hg * g, grad_hg, 0.20, "N/m²"),
+        ],
+    }
+}
+
+pub fn conduction_in_liquid() -> Case {
+    use engine::fluid::{Liquid, LiquidSpec, ROOM_TEMPERATURE};
+    use engine::{RigidBody, Shape, Vec2, World, presets};
+    // Mercury at rest, T = T₀ + A cos(2πx/L): the amplitude decays as
+    // e^(−α k² t), α = k_th / (ρ c).
+    // A closed box: without gravity, surface tension would pull a free
+    // surface into a round drop and stir the liquid.
+    let mut w = presets::tank(0.05, 0.06);
+    w.add_body(RigidBody::new_static(
+        Shape::rect(0.45, 0.2),
+        Vec2::new(0.0, 0.05 + 0.1),
+    ));
+    w.gravity = Vec2::ZERO;
+    w.fluid.params.particle_spacing = 0.0025;
+    w.fluid.params.speed_of_sound = 5.0;
+    let b = w.bodies.clone();
+    w.fluid.fill_rect_as(
+        Vec2::new(-0.025, 0.0),
+        Vec2::new(0.025, 0.05),
+        &b,
+        LiquidSpec::new(Liquid::Mercury),
+    );
+    for _ in 0..steps(1.0) {
+        w.step(DT);
+    }
+    let l = 0.05_f32;
+    let k = std::f32::consts::TAU / l;
+    for i in 0..w.fluid.len() {
+        let x = w.fluid.positions[i].x;
+        w.fluid.temperatures[i] = f64::from(ROOM_TEMPERATURE + 5.0 * (k * x).cos());
+    }
+    let amplitude = |w: &World| -> f64 {
+        let n = w.fluid.len() as f64;
+        let mean = w.fluid.temperatures.iter().sum::<f64>() / n;
+        let (mut num, mut den) = (0.0, 0.0);
+        for i in 0..w.fluid.len() {
+            let c = f64::from((k * w.fluid.positions[i].x).cos());
+            num += (w.fluid.temperatures[i] - mean) * c;
+            den += c * c;
+        }
+        num / den
+    };
+    let alpha = f64::from(
+        Liquid::Mercury.conductivity(0.0)
+            / (Liquid::Mercury.density(0.0) * Liquid::Mercury.specific_heat(0.0)),
+    );
+    let kk = f64::from(k * k);
+    let a0 = amplitude(&w);
+    let mut points = vec![(0.0, 1.0)];
+    for step in 1..=8 {
+        for _ in 0..steps(0.25) {
+            w.step(DT);
+        }
+        points.push((0.25 * f64::from(step), amplitude(&w) / a0));
+    }
+    // Least-squares slope of ln A against t, through A(0) = 1.
+    let (sxy, sxx) = points
+        .iter()
+        .skip(1)
+        .fold((0.0, 0.0), |(sxy, sxx), &(t, a)| {
+            (sxy + t * a.ln(), sxx + t * t)
+        });
+    let rate = -sxy / sxx;
+    let curve: Vec<(f64, f64)> = (0..=40)
+        .map(|i| {
+            let t = 0.05 * i as f64;
+            (t, (-alpha * kk * t).exp())
+        })
+        .collect();
+    Case {
+        id: "conduction",
+        title: "Heat conduction in a liquid",
+        engine: "2D SPH fluid, heat",
+        explanation: format!(
+            "<p>Still mercury with a sinusoidal temperature pattern, 5 K amplitude over a 5 cm wavelength (20 particles per wavelength). \
+             The heat equation says each Fourier mode decays independently, A(t) = A₀ e^(−αk²t), with \
+             mercury's thermal diffusivity α = k/(ρc) = {:.2e} m²/s. The SPH conduction term \
+             (Cleary &amp; Monaghan) uses each liquid's real conductivity and specific heat and conserves \
+             energy pair by pair. The box is closed and there's no gravity (so nothing convects): with an open \
+             top, surface tension, which rules in zero gravity, would pull the mercury into a drop and stir it.</p>",
+            alpha
+        ),
+        chart: Some(
+            Chart::new("Time (s)", "Amplitude / initial amplitude")
+                .with(Series::line("e^(−αk²t)", curve, CARDINAL))
+                .with(Series::points("Simulated", points, GOLD))
+                .svg(),
+        ),
+        checks: vec![check("Decay rate αk²", alpha * kk, rate, 0.10, "1/s")],
+    }
+}
+
+pub fn vacuum_flash() -> Case {
+    use engine3d::fluid::{LiquidSpec, water};
+    use engine3d::{Vec3, presets};
+    // Water at 20 °C suddenly in vacuum. Wherever its own hydrostatic
+    // pressure is below its vapor pressure it boils, cooling until it
+    // reaches the boiling point for that depth: T = T_sat(ρ g h). Below
+    // the depth where that equals 20 °C, it's held liquid.
+    let d = 0.04;
+    let mut w = presets::tank(0.4, 0.4, 0.6);
+    w.fluid.params.particle_spacing = d;
+    w.ambient_pressure = 0.0;
+    let b = w.bodies.clone();
+    w.fluid.fill_box_as(
+        Vec3::new(-0.2, 0.0, -0.2),
+        Vec3::new(0.2, 0.4, 0.2),
+        &b,
+        LiquidSpec::water().at(293.15),
+    );
+    let m0 = f64::from(w.fluid.water_mass());
+    let e0 = w.fluid.thermal_energy();
+    for _ in 0..steps(0.25) {
+        w.step(DT);
+    }
+    let surface = w
+        .fluid
+        .positions
+        .iter()
+        .map(|p| p.y)
+        .fold(0.0_f32, f32::max)
+        + 0.5 * d;
+    let rho = 998.2_f64;
+    let exact = |depth: f64| {
+        let p = (rho * G * depth.max(0.0)) as f32;
+        f64::from(water::saturation_temperature(p).min(293.15)) - 273.15
+    };
+    // Band means by depth, away from the side walls.
+    let bands = 9;
+    let (mut sum, mut n) = (vec![0.0_f64; bands], vec![0_u32; bands]);
+    for (i, p) in w.fluid.positions.iter().enumerate() {
+        if p.x.abs() > 0.12 || p.z.abs() > 0.12 {
+            continue;
+        }
+        let depth = surface - p.y;
+        let k = (depth / 0.04) as usize;
+        if k < bands {
+            sum[k] += w.fluid.temperatures[i] - 273.15;
+            n[k] += 1;
+        }
+    }
+    let points: Vec<(f64, f64)> = (0..bands)
+        .filter(|&k| n[k] > 0)
+        .map(|k| ((k as f64 + 0.5) * 0.04, sum[k] / f64::from(n[k])))
+        .collect();
+    let worst = points
+        .iter()
+        .filter(|(depth, _)| *depth > 0.04)
+        .map(|(depth, t)| (t - exact(*depth)).abs())
+        .fold(0.0, f64::max);
+    let curve: Vec<(f64, f64)> = (0..=40)
+        .map(|i| (0.01 * i as f64, exact(0.01 * i as f64)))
+        .collect();
+    let held_depth = f64::from(water::saturation_pressure(293.15)) / (rho * G);
+    let m1 = f64::from(w.fluid.water_mass() + w.water.vented);
+    let lost = e0 - w.fluid.thermal_energy();
+    Case {
+        id: "vacuum-flash",
+        title: "Water flash-boiling in vacuum",
+        engine: "3D SPH fluid, boiling",
+        explanation: format!(
+            "<p>A 0.4 m pool of 20 °C water with nothing above it. Water boils where the pressure on it is \
+             below its vapor pressure (2.34 kPa at 20 °C), and the only pressure here is the water's own \
+             weight, ρgh. So the top {:.0} cm boils, each layer cooling until it reaches its own boiling \
+             point, T_sat(ρgh) from the IAPWS-IF97 steam-table equation, while the water below stays at \
+             20 °C. The heat that leaves is exactly the latent heat of the vapor that escapes. The profile is \
+             read after 0.25 s: the top band lags because a free surface can only lose molecules at the \
+             Hertz–Knudsen rate, and later the chilled water (denser than 20 °C water) sinks and mixes, as it \
+             would in reality. (Without freezing in the model, the surface stops at 0.01 °C instead of \
+             icing over.)</p>",
+            100.0 * held_depth
+        ),
+        chart: Some(
+            Chart::new("Depth below the surface (m)", "Temperature (°C)")
+                .with(Series::line(
+                    "Boiling point at depth, T_sat(ρgh), up to 20 °C",
+                    curve,
+                    CARDINAL,
+                ))
+                .with(Series::points(
+                    "Simulated (band means, 0.25 s)",
+                    points,
+                    GOLD,
+                ))
+                .svg(),
+        ),
+        checks: vec![
+            check_abs(
+                "Largest band deviation from T_sat(ρgh)",
+                0.0,
+                worst,
+                1.5,
+                "K",
+            ),
+            check("Water (liquid + vapor) conserved", m0, m1, 1e-4, "kg"),
+            check(
+                "Heat lost = latent heat of the vapor",
+                w.water.latent,
+                lost,
+                0.01,
+                "J",
+            ),
+        ],
+    }
+}
+
+pub fn plate_convection() -> Case {
+    use engine3d::fluid::Liquid;
+    use engine3d::{RigidBody, Shape, Vec3, presets};
+    // An 80 °C plate on the floor under 20 °C water. Over the first
+    // moments the heat in should be h A ΔT t with h from turbulent natural
+    // convection.
+    let mut points = Vec::new();
+    let mut checks = Vec::new();
+    for celsius in [40.0_f32, 60.0, 80.0] {
+        let mut w = presets::tank(1.0, 1.0, 1.0);
+        let mut plate =
+            RigidBody::new_static(Shape::cuboid(0.6, 0.04, 0.6), Vec3::new(0.0, 0.02, 0.0));
+        plate.temperature = Some(celsius + 273.15);
+        w.add_body(plate);
+        let b = w.bodies.clone();
+        w.fluid
+            .fill_box(Vec3::new(-0.5, 0.04, -0.5), Vec3::new(0.5, 0.4, 0.5), &b);
+        let e0 = w.fluid.thermal_energy();
+        for _ in 0..steps(0.25) {
+            w.step(DT);
+        }
+        let got = w.fluid.thermal_energy() - e0;
+        let h = Liquid::Water.natural_convection(0.0, 293.15, celsius + 273.15);
+        let expected = f64::from(h * 0.36 * (celsius - 20.0)) * 0.25;
+        points.push((f64::from(celsius - 20.0), got / 0.25 / 0.36));
+        checks.push(check(
+            &format!("Heat in over 0.25 s, plate at {celsius} °C"),
+            expected,
+            got,
+            0.25,
+            "J",
+        ));
+    }
+    let curve: Vec<(f64, f64)> = (1..=70)
+        .map(|dt| {
+            let dt = f64::from(dt);
+            let h = Liquid::Water.natural_convection(0.0, 293.15, 293.15 + dt as f32);
+            (dt, f64::from(h) * dt)
+        })
+        .collect();
+    Case {
+        id: "plate",
+        title: "Heat from a hot plate into water",
+        engine: "3D SPH fluid, heat",
+        explanation: "<p>A 0.6 m square plate held at 40, 60, or 80 °C under 20 °C water. The thermal boundary \
+             layer on a heated wall is far thinner than a particle, so the engine carries heat across the \
+             first layer at the natural-convection rate q = hΔT, with h = 0.13 k (gβΔT/να)^(1/3) (turbulent, \
+             McAdams) from water's properties at the film temperature: the flux grows as ΔT^(4/3). This checks \
+             that the SPH wall term delivers that flux (plate area 0.36 m²; the plate's edges add a little).</p>"
+            .into(),
+        chart: Some(
+            Chart::new("Plate above the water (K)", "Heat flux (W/m²)")
+                .with(Series::line("q = h(ΔT) ΔT", curve, CARDINAL))
+                .with(Series::points("Simulated, first 0.25 s", points, GOLD))
+                .svg(),
+        ),
+        checks,
+    }
+}
+
 /// Every case, in page order.
 pub fn all() -> Vec<(&'static str, Scenario)> {
     vec![
@@ -936,6 +1288,10 @@ pub fn all() -> Vec<(&'static str, Scenario)> {
         ("archimedes", archimedes),
         ("heat", heat_diffusion),
         ("buoyancy", buoyant_start),
+        ("layered", layered_hydrostatics),
+        ("conduction", conduction_in_liquid),
+        ("plate", plate_convection),
+        ("vacuum flash", vacuum_flash),
         ("kepler", kepler),
     ]
 }
