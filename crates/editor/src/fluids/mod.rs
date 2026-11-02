@@ -208,6 +208,8 @@ struct Settings {
     color_by: ColorBy,
     smooth: bool,
     time_scale: f32,
+    /// Step the liquid on the GPU when there is one.
+    use_gpu: bool,
 }
 
 impl Default for Settings {
@@ -237,6 +239,7 @@ impl Default for Settings {
             color_by: ColorBy::Liquid,
             smooth: true,
             time_scale: 1.0,
+            use_gpu: true,
         }
     }
 }
@@ -306,6 +309,9 @@ pub struct FluidsEditor {
     graph: graph::Graph,
     status: Option<String>,
     gpu_render: bool,
+    /// The GPU fluid solver, if this machine can run it (desktop only).
+    #[cfg(not(target_arch = "wasm32"))]
+    gpu_solver: Option<gpu::GpuSolver3d>,
 }
 
 impl FluidsEditor {
@@ -344,6 +350,8 @@ impl FluidsEditor {
             graph: graph::Graph::default(),
             status: None,
             gpu_render: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            gpu_solver: None,
         };
         // A fluid step can take tens of milliseconds; at most a few per
         // frame keeps the window responsive (time then runs slower).
@@ -363,6 +371,27 @@ impl FluidsEditor {
     /// The box as a 3D scene file.
     pub fn scene_json(&self) -> String {
         Scene::from_world(&self.world).to_json()
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn set_gpu_solver(&mut self, solver: Option<gpu::GpuSolver3d>) {
+        self.gpu_solver = solver;
+    }
+
+    /// The GPU's name, if the GPU fluid solver can be used here.
+    fn gpu_name(&self) -> Option<&str> {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(solver) = &self.gpu_solver {
+            return Some(solver.adapter_name());
+        }
+        None
+    }
+
+    /// Whether this step will run on the GPU.
+    fn on_gpu(&self) -> bool {
+        self.settings.use_gpu
+            && self.gpu_name().is_some()
+            && self.world.fluid.gpu_can_step(self.world.gravity)
     }
 
     pub fn set_gpu_render(&mut self, on: bool) {
@@ -407,6 +436,14 @@ impl FluidsEditor {
                 .world
                 .fluid
                 .add_heat(c, r, self.settings.heat_power, dt);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.settings.use_gpu
+            && let Some(solver) = self.gpu_solver.as_mut()
+        {
+            self.world.step_with(dt, solver);
+            self.graph.record(&self.world, self.brush_energy);
+            return;
         }
         self.world.step(dt);
         self.graph.record(&self.world, self.brush_energy);

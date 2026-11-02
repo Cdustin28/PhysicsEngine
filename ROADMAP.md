@@ -460,5 +460,16 @@ Known limit (Fluids tab): mercury makes the solver ~4× slower (its density forc
 
 Known limit: buoyant blobs that are resolved (several particles across) rise more slowly than real ones; a perfectly flat oil layer under water waits for a disturbance before it overturns, as it would in reality. An implicit incompressible solver (DFSPH) was tried and didn't help; it's parked.
 
+## M13: Liquids on the GPU
+
+**Goal:** the Fluids tab at GPU speed. The 3D GPU solver did only fresh water at one temperature; anything else fell back to the CPU.
+
+- [x] The 3D shaders now run the multiphase formulation (number density, shared stiffness, p/δ² pressure force), each liquid's viscosity (Morris) and thermal expansion, heat conduction between particles, and walls and plates held at a temperature (with the same natural-convection / nucleate-boiling wall conductivity as the CPU). Sub-resolution settling runs on the CPU after each GPU step, as on the CPU path.
+- [x] Temperatures: an f32 can't resolve one substep of conduction at 300 K, so the GPU carries each particle's start-of-step temperature and, separately, the small change since; the CPU adds the change to its f64 temperature.
+- [x] Still on the CPU: surface tension (millimetre particles only). Salt doesn't diffuse on the GPU (1.5 × 10⁻⁹ m²/s: it barely moves in a simulation's time anyway).
+- [x] The Fluids tab gets "Simulate on the GPU" (on by default when there's a GPU); the status bar shows which is stepping. The 3D tab's GPU toggle now covers every liquid too.
+- [x] Tests (`gpu/tests/agreement3d.rs`): mercury falling into oil over warm water beside an 80 °C plate agrees with the CPU after one step on positions (5% of a spacing), each liquid's mean temperature (10⁻³ K), heat moved (5%), and wall force (3%); mercury sinks through water on the GPU.
+- [x] Benchmark: `cargo run --release -p gpu --example bench_fluids --features parallel` (the Fluids tab's scene at 4, 3, and 2.5 cm).
+
 ## Later
 

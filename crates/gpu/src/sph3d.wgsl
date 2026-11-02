@@ -1,25 +1,32 @@
-// 3D weakly compressible SPH on the GPU: the same equations as the CPU
-// solver in `engine3d::fluid`, and the same structure as the 2D shader
-// (`sph.wgsl`), one compute pass per stage.
+// 3D weakly compressible SPH on the GPU, several liquids and heat: the same
+// equations as the CPU solver in `engine3d::fluid` (one compute pass per
+// stage).
 //
 // Each substep runs, in order:
 //   clear_heads       empty the neighbor hash table
 //   insert            push every particle onto its cell's linked list
-//   density           density (fluid + boundary) and Tait pressure
-//   forces            pressure + viscosity + gravity -> next velocity
-//   boundary_impulse  the reaction each boundary particle feels (M3 coupling)
+//   density           number density (fluid + boundary), density, pressure
+//   forces            pressure, viscosity, gravity -> next velocity;
+//                     conduction -> rate of temperature change
+//   boundary_impulse  the reaction each boundary particle feels (coupling)
 //   integrate         semi-implicit Euler with the speed cap
+//
+// Several liquids (Solenthaler & Pajarola 2008): each particle sums the
+// *number density* δ = Σ W (boundary particles count ψ/m_ref each), its
+// density is its own mass times that, ρ = m δ, and the pressure force is
+// −(1/m_i) Σ (p_i/δ_i² + p_j/δ_j²) ∇W. Every liquid shares one stiffness.
 //
 // Neighbor grid: cells of side h, hashed into `heads`. Each particle stores
 // its cell and the index of the next particle in the same bucket, so a
-// bucket is a linked list built with atomicExchange in a single pass (no
-// sorting or prefix sums). Different cells can share a bucket, so walks
-// compare the stored cell with the queried one.
+// bucket is a linked list built with atomicExchange in a single pass.
 //
-// Buffers are packed into vec4s to stay within WebGPU's limit of 8 storage
-// buffers per shader stage. A 3D particle needs six floats, so positions and
-// velocities share one buffer: element 2i is particle i's position, 2i + 1
-// its velocity (likewise for boundary particles).
+// Temperatures: each particle's temperature at the start of the step is
+// `base` (constant during the step) and the change since then is `delta`.
+// Conduction changes a temperature by far less per substep than an f32 can
+// resolve at 300 K, so the small `delta` carries it, and the CPU adds it to
+// its f64 temperature afterwards.
+//
+// Buffers are packed into vec4s to stay within WebGPU's 8 storage buffers.
 
 struct Params {
     n: u32,             // fluid particles
@@ -29,11 +36,11 @@ struct Params {
     h: f32,             // kernel support
     h2: f32,
     inv_cell: f32,      // 1 / h
-    mass: f32,          // per fluid particle
-    rho0: f32,
-    stiffness: f32,     // Tait B
+    m_ref: f32,         // reference particle mass (water at rest density)
+    v0: f32,            // rest volume of every particle
+    stiffness: f32,     // shared Tait B
     c: f32,             // speed of sound
-    alpha: f32,         // fluid viscosity
+    alpha: f32,         // artificial viscosity
     alpha_wall: f32,    // wall viscosity
     h_visc: f32,        // smoothing length for viscosity (h / 2)
     eps: f32,           // 0.01 h_visc^2
@@ -41,21 +48,23 @@ struct Params {
     gravity: vec4<f32>, // xyz; 16-byte aligned
     max_speed: f32,
     sigma: f32,         // kernel normalization 8 / (pi h^3)
-    _pad0: f32,
-    _pad1: f32,
+    use_viscosity: u32, // each liquid's physical viscosity (Morris)
+    use_heat: u32,      // conduction
 };
 
 @group(0) @binding(0) var<uniform> P: Params;
-// [2i] = x, y, z, unused; [2i + 1] = vx, vy, vz, unused
+// [3i] = x, y, z, temperature delta; [3i + 1] = velocity;
+// [3i + 2] = next velocity xyz, rate of temperature change
 @group(0) @binding(1) var<storage, read_write> particles: array<vec4<f32>>;
-// density, pressure, unused, unused
+// density, pressure, number density, pressure / δ²
 @group(0) @binding(2) var<storage, read_write> scratch: array<vec4<f32>>;
-// velocity after this substep's forces
-@group(0) @binding(3) var<storage, read_write> next_velocity: array<vec4<f32>>;
+// [2i] = mass, viscosity, conductivity, specific heat;
+// [2i + 1] = rest-volume ratio, base temperature, wall conductivity, unused
+@group(0) @binding(3) var<storage, read_write> material: array<vec4<f32>>;
 // cell x, y, z, next particle in bucket (-1 = end)
 @group(0) @binding(4) var<storage, read_write> links: array<vec4<i32>>;
 @group(0) @binding(5) var<storage, read_write> heads: array<atomic<i32>>;
-// [2b] = boundary position, [2b + 1] = its velocity
+// [2b] = boundary position, held temperature (< 0: none); [2b + 1] = velocity
 @group(0) @binding(6) var<storage, read_write> boundary: array<vec4<f32>>;
 // boundary psi, accumulated impulse x, y, z
 @group(0) @binding(7) var<storage, read_write> boundary_extra: array<vec4<f32>>;
@@ -66,7 +75,6 @@ struct Params {
 const WG: u32 = 64u;
 
 fn cell_of(x: vec3<f32>) -> vec3<i32> {
-    // Clamp so far-flung particles can't overflow the integer conversion.
     return vec3<i32>(clamp(floor(x * P.inv_cell), vec3<f32>(-1.0e9), vec3<f32>(1.0e9)));
 }
 
@@ -77,9 +85,11 @@ fn hash(c: vec3<i32>, mask: u32) -> u32 {
         ^ (bitcast<u32>(c.z) * 83492791u)) & mask;
 }
 
-fn pos(i: u32) -> vec3<f32> { return particles[2u * i].xyz; }
-fn vel(i: u32) -> vec3<f32> { return particles[2u * i + 1u].xyz; }
+fn pos(i: u32) -> vec3<f32> { return particles[3u * i].xyz; }
+fn tdelta(i: u32) -> f32 { return particles[3u * i].w; }
+fn vel(i: u32) -> vec3<f32> { return particles[3u * i + 1u].xyz; }
 fn bpos(b: u32) -> vec3<f32> { return boundary[2u * b].xyz; }
+fn bheld(b: u32) -> f32 { return boundary[2u * b].w; }
 fn bvel(b: u32) -> vec3<f32> { return boundary[2u * b + 1u].xyz; }
 fn same_cell(l: vec4<i32>, c: vec3<i32>) -> bool { return all(l.xyz == c); }
 
@@ -136,9 +146,8 @@ fn density(@builtin(global_invocation_id) id: vec3<u32>) {
     }
     let xi = pos(i);
     let ci = cell_of(xi);
-    var rho = P.mass * kernel_w(0.0);
+    var delta = kernel_w(0.0);
 
-    // The 27 cells around this one: offsets -1..1 on each axis.
     for (var cell_index = 0; cell_index < 27; cell_index++) {
         {
             let c = ci + vec3<i32>(cell_index % 3 - 1, (cell_index / 3) % 3 - 1, cell_index / 9 - 1);
@@ -149,7 +158,7 @@ fn density(@builtin(global_invocation_id) id: vec3<u32>) {
                 if (same_cell(l, c) && u32(j) != i) {
                     let r = length(xi - pos(u32(j)));
                     if (r < P.h) {
-                        rho += P.mass * kernel_w(r);
+                        delta += kernel_w(r);
                     }
                 }
                 j = l.w;
@@ -163,7 +172,7 @@ fn density(@builtin(global_invocation_id) id: vec3<u32>) {
                     if (same_cell(l, c)) {
                         let r = length(xi - bpos(u32(b)));
                         if (r < P.h) {
-                            rho += boundary_extra[b].x * kernel_w(r);
+                            delta += boundary_extra[b].x / P.m_ref * kernel_w(r);
                         }
                     }
                     b = l.w;
@@ -172,8 +181,11 @@ fn density(@builtin(global_invocation_id) id: vec3<u32>) {
         }
     }
 
-    let pressure = max(P.stiffness * (pow(rho / P.rho0, 7.0) - 1.0), 0.0);
-    scratch[i] = vec4<f32>(rho, pressure, 0.0, 0.0);
+    let m = material[2u * i];
+    let volume_ratio = material[2u * i + 1u].x;
+    let rho = m.x * delta;
+    let pressure = max(P.stiffness * (pow(delta * P.v0 * volume_ratio, 7.0) - 1.0), 0.0);
+    scratch[i] = vec4<f32>(rho, pressure, delta, pressure / (delta * delta));
 }
 
 @compute @workgroup_size(WG)
@@ -184,12 +196,17 @@ fn forces(@builtin(global_invocation_id) id: vec3<u32>) {
     }
     let xi = pos(i);
     let vi = vel(i);
-    let rho_i = scratch[i].x;
-    let pi_term = scratch[i].y / (rho_i * rho_i);
+    let si = scratch[i];
+    let mi = material[2u * i];
+    let mi2 = material[2u * i + 1u];
+    let mass_i = mi.x;
+    let inv_m = 1.0 / mass_i;
+    let base_i = mi2.y;
+    let td_i = tdelta(i);
     let ci = cell_of(xi);
     var a = P.gravity.xyz;
+    var heat = 0.0;
 
-    // The 27 cells around this one: offsets -1..1 on each axis.
     for (var cell_index = 0; cell_index < 27; cell_index++) {
         {
             let c = ci + vec3<i32>(cell_index % 3 - 1, (cell_index / 3) % 3 - 1, cell_index / 9 - 1);
@@ -197,17 +214,32 @@ fn forces(@builtin(global_invocation_id) id: vec3<u32>) {
             loop {
                 if (j < 0) { break; }
                 let l = links[j];
-                if (same_cell(l, c) && u32(j) != i) {
-                    let r = xi - pos(u32(j));
+                let uj = u32(j);
+                if (same_cell(l, c) && uj != i) {
+                    let r = xi - pos(uj);
                     let dist = length(r);
                     if (dist < P.h) {
                         let grad = kernel_grad(r, dist);
-                        let sj = scratch[j];
-                        a -= P.mass * (pi_term + sj.y / (sj.x * sj.x)) * grad;
-                        let vr = dot(vi - vel(u32(j)), r);
+                        let sj = scratch[uj];
+                        let mj = material[2u * uj];
+                        let r2e = dist * dist + P.eps;
+                        a -= inv_m * (si.w + sj.w) * grad;
+                        let v_ij = vi - vel(uj);
+                        let vr = dot(v_ij, r);
                         if (vr < 0.0) {
-                            let nu = 2.0 * P.alpha * P.h_visc * P.c / (rho_i + sj.x);
-                            a -= P.mass * (-nu * vr / (dist * dist + P.eps)) * grad;
+                            let nu = 2.0 * P.alpha * P.h_visc * P.c / (si.x + sj.x);
+                            a -= mj.x * (-nu * vr / r2e) * grad;
+                        }
+                        let rg = dot(r, grad);
+                        if (P.use_viscosity != 0u) {
+                            a += inv_m * (mi.y + mj.y) * rg / (si.z * sj.z * r2e) * v_ij;
+                        }
+                        if (P.use_heat != 0u) {
+                            let k_ij = 4.0 * mi.z * mj.z / (mi.z + mj.z);
+                            // Base difference and delta difference apart,
+                            // so small changes aren't lost to rounding.
+                            let diff = (base_i - material[2u * uj + 1u].y) + (td_i - tdelta(uj));
+                            heat += k_ij * diff * rg / (sj.z * r2e);
                         }
                     }
                 }
@@ -219,17 +251,29 @@ fn forces(@builtin(global_invocation_id) id: vec3<u32>) {
                 loop {
                     if (b < 0) { break; }
                     let l = boundary_grid[P.btable_size + u32(b)];
+                    let ub = u32(b);
                     if (same_cell(l, c)) {
-                        let r = xi - bpos(u32(b));
+                        let r = xi - bpos(ub);
                         let dist = length(r);
                         if (dist < P.h) {
                             let grad = kernel_grad(r, dist);
-                            let psi = boundary_extra[b].x;
-                            a -= psi * pi_term * grad;
-                            let vr = dot(vi - bvel(u32(b)), r);
+                            let w = boundary_extra[ub].x / P.m_ref;
+                            let r2e = dist * dist + P.eps;
+                            a -= w * inv_m * si.w * grad;
+                            let v_ib = vi - bvel(ub);
+                            let vr = dot(v_ib, r);
                             if (vr < 0.0) {
-                                let nu = P.alpha_wall * P.h_visc * P.c / rho_i;
-                                a -= psi * (-nu * vr / (dist * dist + P.eps)) * grad;
+                                let nu = P.alpha_wall * P.h_visc * P.c / si.x;
+                                a -= w * mass_i * (-nu * vr / r2e) * grad;
+                            }
+                            let rg = dot(r, grad);
+                            if (P.use_viscosity != 0u) {
+                                a += w * inv_m * 2.0 * mi.y * rg / (si.z * si.z * r2e) * v_ib;
+                            }
+                            let held = bheld(ub);
+                            if (P.use_heat != 0u && held >= 0.0) {
+                                let diff = (base_i - held) + td_i;
+                                heat += 2.0 * mi2.z * w * P.v0 * diff * rg / r2e;
                             }
                         }
                     }
@@ -244,7 +288,7 @@ fn forces(@builtin(global_invocation_id) id: vec3<u32>) {
     if (speed > P.max_speed) {
         v *= P.max_speed / speed;
     }
-    next_velocity[i] = vec4<f32>(v, 0.0);
+    particles[3u * i + 2u] = vec4<f32>(v, heat / (mass_i * si.z * mi.w));
 }
 
 // For each boundary particle, the exact opposite of the force it applied to
@@ -258,11 +302,10 @@ fn boundary_impulse(@builtin(global_invocation_id) id: vec3<u32>) {
     let xb = bpos(b);
     let vb = bvel(b);
     let extra = boundary_extra[b];
-    let psi = extra.x;
+    let w = extra.x / P.m_ref;
     let cb = cell_of(xb);
     var f = vec3<f32>(0.0);
 
-    // The 27 cells around this one: offsets -1..1 on each axis.
     for (var cell_index = 0; cell_index < 27; cell_index++) {
         {
             let c = cb + vec3<i32>(cell_index % 3 - 1, (cell_index / 3) % 3 - 1, cell_index / 9 - 1);
@@ -270,25 +313,33 @@ fn boundary_impulse(@builtin(global_invocation_id) id: vec3<u32>) {
             loop {
                 if (j < 0) { break; }
                 let l = links[j];
+                let uj = u32(j);
                 if (same_cell(l, c)) {
-                    let r = pos(u32(j)) - xb;
+                    let r = pos(uj) - xb;
                     let dist = length(r);
                     if (dist < P.h) {
-                        let sj = scratch[j];
-                        var coefficient = sj.y / (sj.x * sj.x);
-                        let vr = dot(vel(u32(j)) - vb, r);
+                        let grad = kernel_grad(r, dist);
+                        let sj = scratch[uj];
+                        let mj = material[2u * uj];
+                        let r2e = dist * dist + P.eps;
+                        let v_ib = vel(uj) - vb;
+                        let vr = dot(v_ib, r);
+                        var force = w * sj.w * grad;
                         if (vr < 0.0) {
                             let nu = P.alpha_wall * P.h_visc * P.c / sj.x;
-                            coefficient += -nu * vr / (dist * dist + P.eps);
+                            force += w * mj.x * mj.x * (-nu * vr / r2e) * grad;
                         }
-                        f += P.mass * psi * coefficient * kernel_grad(r, dist);
+                        if (P.use_viscosity != 0u) {
+                            force -= w * 2.0 * mj.y * dot(r, grad) / (sj.z * sj.z * r2e) * v_ib;
+                        }
+                        f += force;
                     }
                 }
                 j = l.w;
             }
         }
     }
-    boundary_extra[b] = vec4<f32>(psi, extra.yzw + f * P.dt);
+    boundary_extra[b] = vec4<f32>(extra.x, extra.yzw + f * P.dt);
 }
 
 @compute @workgroup_size(WG)
@@ -297,7 +348,8 @@ fn integrate(@builtin(global_invocation_id) id: vec3<u32>) {
     if (i >= P.n) {
         return;
     }
-    let v = next_velocity[i].xyz;
-    particles[2u * i] = vec4<f32>(pos(i) + v * P.dt, 0.0);
-    particles[2u * i + 1u] = vec4<f32>(v, 0.0);
+    let next = particles[3u * i + 2u];
+    let v = next.xyz;
+    particles[3u * i] = vec4<f32>(pos(i) + v * P.dt, tdelta(i) + next.w * P.dt);
+    particles[3u * i + 1u] = vec4<f32>(v, 0.0);
 }
