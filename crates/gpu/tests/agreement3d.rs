@@ -139,3 +139,129 @@ fn gpu_momentum_is_exchanged_exactly() {
         "momentum {before} -> {after}"
     );
 }
+
+/// Several liquids and heat: one step from the same moving state (mercury
+/// falling into oil over warm water, beside an 80 °C plate) agrees on
+/// positions, temperatures, and the energy conduction moved.
+#[test]
+fn liquids_and_heat_match_cpu() {
+    use engine3d::fluid::{Liquid, LiquidSpec};
+    let Some(mut gpu) = gpu() else { return };
+    let mut w = presets::tank(1.0, 1.0, 1.2);
+    let mut plate = RigidBody::new_static(Shape::cuboid(0.4, 0.04, 0.4), Vec3::new(0.0, 0.02, 0.0));
+    plate.temperature = Some(353.15);
+    w.add_body(plate);
+    let b = w.bodies.clone();
+    w.fluid.fill_box_as(
+        Vec3::new(-0.5, 0.04, -0.5),
+        Vec3::new(0.5, 0.3, 0.5),
+        &b,
+        LiquidSpec::water().at(310.0),
+    );
+    w.fluid.fill_box_as(
+        Vec3::new(-0.5, 0.3, -0.5),
+        Vec3::new(0.5, 0.5, 0.5),
+        &b,
+        LiquidSpec::new(Liquid::Oil),
+    );
+    w.fluid.fill_sphere_as(
+        Vec3::new(0.0, 0.75, 0.0),
+        0.15,
+        &b,
+        LiquidSpec::new(Liquid::Mercury).at(330.0),
+    );
+    for _ in 0..20 {
+        w.step(DT);
+    }
+    let mut on_cpu = w.clone();
+    let mut on_gpu = w;
+    let e0 = on_cpu.fluid.thermal_energy();
+    on_cpu.step_with(DT, &mut CpuSolver);
+    on_gpu.step_with(DT, &mut gpu);
+
+    let d = on_cpu.fluid.params.particle_spacing;
+    // Match particles by nearest position (the solvers order them
+    // differently).
+    let pos_err = on_cpu
+        .fluid
+        .positions
+        .iter()
+        .map(|p| {
+            on_gpu
+                .fluid
+                .positions
+                .iter()
+                .map(|q| (*p - *q).length())
+                .fold(f32::INFINITY, f32::min)
+        })
+        .sum::<f32>()
+        / on_cpu.fluid.len() as f32;
+    assert!(
+        pos_err < 0.05 * d,
+        "positions differ by {pos_err} m on average"
+    );
+    // Each liquid's mean temperature. (Particles of different liquids too
+    // finely mixed to separate trade places, and which pair trades depends
+    // on exact positions, so particle-by-particle temperatures aren't
+    // comparable; per-liquid means are.)
+    let mean_t = |w: &World, l: Liquid| {
+        let (s, n) = (0..w.fluid.len())
+            .filter(|&i| w.fluid.liquid(i) == l)
+            .fold((0.0, 0), |(s, n), i| (s + w.fluid.temperatures[i], n + 1));
+        s / f64::from(n)
+    };
+    for l in Liquid::ALL {
+        let (tc, tg) = (mean_t(&on_cpu, l), mean_t(&on_gpu, l));
+        assert!(
+            (tc - tg).abs() < 1e-3,
+            "{l:?}: mean {tc} K (CPU) vs {tg} K (GPU)"
+        );
+    }
+
+    // Heat moved by conduction (mostly in from the plate) agrees.
+    let (dc, dg) = (
+        on_cpu.fluid.thermal_energy() - e0,
+        on_gpu.fluid.thermal_energy() - e0,
+    );
+    assert!(dc.abs() > 1.0, "no heat moved ({dc} J)");
+    assert!(
+        (dg / dc - 1.0).abs() < 0.05,
+        "heat in {dc} J (CPU) vs {dg} J (GPU)"
+    );
+
+    let force = |w: &World| w.fluid_forces.iter().map(|f| f.0).sum::<Vec3>();
+    let (fc, fg) = (force(&on_cpu), force(&on_gpu));
+    assert!(
+        (fc - fg).length() < 0.03 * fc.length(),
+        "net fluid force {fc} (CPU) vs {fg} (GPU)"
+    );
+}
+
+/// Mercury sinks through water on the GPU as on the CPU.
+#[test]
+fn gpu_mercury_sinks_through_water() {
+    use engine3d::fluid::{Liquid, LiquidSpec};
+    let Some(mut gpu) = gpu() else { return };
+    let mut w = presets::tank(0.8, 0.8, 1.0);
+    let b = w.bodies.clone();
+    w.fluid
+        .fill_box(Vec3::new(-0.4, 0.0, -0.4), Vec3::new(0.4, 0.4, 0.4), &b);
+    w.fluid.fill_box_as(
+        Vec3::new(-0.4, 0.4, -0.4),
+        Vec3::new(0.4, 0.5, 0.4),
+        &b,
+        LiquidSpec::new(Liquid::Mercury),
+    );
+    let mercury_height = |w: &World| {
+        let (s, n) = (0..w.fluid.len())
+            .filter(|&i| w.fluid.liquid(i) == Liquid::Mercury)
+            .fold((0.0, 0), |(s, n), i| (s + w.fluid.positions[i].y, n + 1));
+        s / n as f32
+    };
+    let start = mercury_height(&w);
+    for _ in 0..(3.0 / DT) as usize {
+        w.step_with(DT, &mut gpu);
+    }
+    let end = mercury_height(&w);
+    assert!(end < 0.15, "mercury from {start} m to {end} m");
+}

@@ -1,8 +1,11 @@
 //! The 3D GPU fluid solver: [`engine3d`]'s SPH as compute shaders
-//! (`sph3d.wgsl`). It works exactly like the 2D [`GpuSolver`](crate::GpuSolver)
-//! (upload, run every substep on the GPU, read back), with 3D cells (27
-//! around each particle) and positions and velocities interleaved in one
-//! buffer so the shader stays within WebGPU's 8 storage buffers.
+//! (`sph3d.wgsl`), with every liquid (the multiphase formulation, each
+//! liquid's viscosity and thermal expansion) and heat (conduction, walls
+//! and plates held at a temperature). It works like the 2D
+//! [`GpuSolver`](crate::GpuSolver): upload, run every substep on the GPU,
+//! read back. Surface tension (only on for millimetre particles) stays on
+//! the CPU, and salt doesn't diffuse on the GPU (at its real rate it barely
+//! moves in a simulation's time anyway).
 
 use crate::read;
 use bytemuck::{Pod, Zeroable};
@@ -24,8 +27,8 @@ struct Params {
     h: f32,
     h2: f32,
     inv_cell: f32,
-    mass: f32,
-    rho0: f32,
+    m_ref: f32,
+    v0: f32,
     stiffness: f32,
     c: f32,
     alpha: f32,
@@ -37,7 +40,8 @@ struct Params {
     gravity: [f32; 4],
     max_speed: f32,
     sigma: f32,
-    _pad: [f32; 2],
+    use_viscosity: u32,
+    use_heat: u32,
 }
 
 /// Every buffer the shader binds, sized for at least `capacity` fluid and
@@ -48,7 +52,7 @@ struct Buffers {
     scratch: wgpu::Buffer,
     // Only the shader touches these three (through `bind_group`); they're
     // kept here so ownership of every buffer is in one place.
-    _next_velocity: wgpu::Buffer,
+    material: wgpu::Buffer,
     _links: wgpu::Buffer,
     _heads: wgpu::Buffer,
     boundary: wgpu::Buffer,
@@ -152,9 +156,8 @@ impl FluidSolver for GpuSolver3d {
         dt: f32,
         body_count: usize,
     ) -> Vec<BodyImpulse> {
-        // Several liquids or salt water: the CPU solver handles those
-        // (the shaders know only fresh water so far).
-        if !fluid.gpu_can_step() || boundary.has_temperatures() {
+        // Surface tension (millimetre particles) stays on the CPU.
+        if !fluid.gpu_can_step(gravity) {
             return engine3d::CpuSolver.step(fluid, boundary, gravity, dt, body_count);
         }
         let mut impulses = vec![BodyImpulse::default(); body_count];
@@ -171,7 +174,9 @@ impl FluidSolver for GpuSolver3d {
         let n = fluid.len();
         let nb = boundary.len();
         let h = params.support();
-        let substeps = params.worst_case_substeps(dt);
+        let substeps = fluid.worst_case_substeps(dt);
+        let effects = fluid.effects(gravity);
+        let use_heat = fluid.conducts_heat(boundary);
 
         // Boundary hash grid, built here since the boundary is fixed for the
         // whole step: bucket heads, then one link per boundary particle.
@@ -196,9 +201,9 @@ impl FluidSolver for GpuSolver3d {
             h,
             h2: h * h,
             inv_cell: 1.0 / h,
-            mass: params.particle_mass(),
-            rho0: params.rest_density,
-            stiffness: params.stiffness(),
+            m_ref: params.particle_mass(),
+            v0: params.particle_mass() / params.rest_density,
+            stiffness: fluid.shared_stiffness(),
             c: params.speed_of_sound,
             alpha: params.viscosity,
             alpha_wall: params.wall_viscosity,
@@ -208,22 +213,69 @@ impl FluidSolver for GpuSolver3d {
             gravity: gravity.extend(0.0).to_array(),
             max_speed: params.max_speed(),
             sigma: 8.0 / (std::f32::consts::PI * h * h * h),
-            _pad: [0.0; 2],
+            use_viscosity: u32::from(effects.viscosity),
+            use_heat: u32::from(use_heat),
         };
 
         // --- Upload.
-        // Interleaved: position, velocity, position, velocity, ...
+        // Per particle: position (+ temperature change, 0), velocity, and a
+        // slot the forces pass writes the next velocity into.
         let particles: Vec<[f32; 4]> = fluid
             .positions
             .iter()
             .zip(&fluid.velocities)
-            .flat_map(|(p, v)| [p.extend(0.0).to_array(), v.extend(0.0).to_array()])
+            .flat_map(|(p, v)| [p.extend(0.0).to_array(), v.extend(0.0).to_array(), [0.0; 4]])
+            .collect();
+        // Each boundary particle's held temperature (its body's, else the
+        // walls'), or −1 for none.
+        let wall_t = params.wall_temperature;
+        let held: Vec<f32> = boundary
+            .body
+            .iter()
+            .map(|&b| {
+                boundary
+                    .body_temperatures
+                    .get(b as usize)
+                    .copied()
+                    .flatten()
+                    .or(wall_t)
+                    .unwrap_or(-1.0)
+            })
             .collect();
         let boundary_data: Vec<[f32; 4]> = boundary
             .positions
             .iter()
             .zip(&boundary.velocities)
-            .flat_map(|(p, v)| [p.extend(0.0).to_array(), v.extend(0.0).to_array()])
+            .zip(&held)
+            .flat_map(|((p, v), &t)| [p.extend(t).to_array(), v.extend(0.0).to_array()])
+            .collect();
+        // Properties, constant over the step. Against a held wall a
+        // particle conducts at its wall conductivity, worked out here for
+        // the temperature of the nearest held boundary particle.
+        let any_held = held.iter().any(|&t| t >= 0.0);
+        let h2 = h * h;
+        let material: Vec<[f32; 4]> = (0..n)
+            .flat_map(|i| {
+                let [mass, mu, k, cp, volume_ratio] = fluid.solver_properties(i);
+                let mut k_wall = k;
+                if any_held && use_heat {
+                    let xi = fluid.positions[i];
+                    let mut nearest = (h2, -1.0_f32);
+                    boundary.grid.for_each_near(xi, |b, xb| {
+                        let d2 = (xi - xb).length_squared();
+                        if held[b] >= 0.0 && d2 < nearest.0 {
+                            nearest = (d2, held[b]);
+                        }
+                    });
+                    if nearest.1 >= 0.0 {
+                        k_wall = fluid.wall_conductivity(i, nearest.1);
+                    }
+                }
+                [
+                    [mass, mu, k, cp],
+                    [volume_ratio, fluid.temperature(i), k_wall, 0.0],
+                ]
+            })
             .collect();
         let boundary_extra: Vec<[f32; 4]> = boundary
             .psi
@@ -233,6 +285,7 @@ impl FluidSolver for GpuSolver3d {
         let q = &self.queue;
         q.write_buffer(&buffers.params, 0, bytemuck::bytes_of(&uniform));
         q.write_buffer(&buffers.particles, 0, bytemuck::cast_slice(&particles));
+        q.write_buffer(&buffers.material, 0, bytemuck::cast_slice(&material));
         if nb > 0 {
             q.write_buffer(&buffers.boundary, 0, bytemuck::cast_slice(&boundary_data));
             q.write_buffer(
@@ -277,7 +330,7 @@ impl FluidSolver for GpuSolver3d {
         }
 
         // --- Read back.
-        let particle_bytes = (n * 32) as u64;
+        let particle_bytes = (n * 48) as u64;
         let scratch_bytes = (n * 16) as u64;
         let extra_bytes = (nb * 16) as u64;
         encoder.copy_buffer_to_buffer(
@@ -307,15 +360,21 @@ impl FluidSolver for GpuSolver3d {
             Vec::new()
         };
 
-        for (i, pair) in particles.as_chunks::<2>().0.iter().enumerate() {
-            fluid.positions[i] = Vec3::new(pair[0][0], pair[0][1], pair[0][2]);
-            fluid.velocities[i] = Vec3::new(pair[1][0], pair[1][1], pair[1][2]);
+        for (i, slot) in particles.as_chunks::<3>().0.iter().enumerate() {
+            fluid.positions[i] = Vec3::new(slot[0][0], slot[0][1], slot[0][2]);
+            fluid.velocities[i] = Vec3::new(slot[1][0], slot[1][1], slot[1][2]);
+            if use_heat {
+                fluid.temperatures[i] = (fluid.temperatures[i] + f64::from(slot[0][3])).max(1.0);
+            }
         }
         fluid.record_external_step(
             scratch.iter().map(|s| s[0]).collect(),
             scratch.iter().map(|s| s[1]).collect(),
             substeps,
         );
+        // Liquids too finely mixed to separate by flow trade places, as on
+        // the CPU.
+        fluid.settle_unresolved(gravity, dt);
 
         // Sum boundary-particle impulses into each body's force and torque.
         for (b, e) in extra.iter().enumerate() {
@@ -437,15 +496,15 @@ impl Buffers {
             usage: U::UNIFORM | U::COPY_DST,
             mapped_at_creation: false,
         });
-        let particles = storage("particles", capacity * 32, U::COPY_SRC);
+        let particles = storage("particles", capacity * 48, U::COPY_SRC);
         let scratch = storage("scratch", capacity * 16, U::COPY_SRC);
-        let next_velocity = storage("next velocity", capacity * 16, U::empty());
+        let material = storage("material", capacity * 32, U::empty());
         let links = storage("links", capacity * 16, U::empty());
         let heads = storage("heads", table_size * 4, U::empty());
         let boundary = storage("boundary", boundary_capacity * 32, U::empty());
         let boundary_extra = storage("boundary extra", boundary_capacity * 16, U::COPY_SRC);
         let boundary_grid = storage("boundary grid", boundary_grid_capacity * 16, U::empty());
-        let read_particles = staging("read particles", capacity * 32);
+        let read_particles = staging("read particles", capacity * 48);
         let read_scratch = staging("read scratch", capacity * 16);
         let read_boundary_extra = staging("read boundary extra", boundary_capacity * 16);
 
@@ -456,7 +515,7 @@ impl Buffers {
                 params.as_entire_binding(),
                 particles.as_entire_binding(),
                 scratch.as_entire_binding(),
-                next_velocity.as_entire_binding(),
+                material.as_entire_binding(),
                 links.as_entire_binding(),
                 heads.as_entire_binding(),
                 boundary.as_entire_binding(),
@@ -475,7 +534,7 @@ impl Buffers {
             params,
             particles,
             scratch,
-            _next_velocity: next_velocity,
+            material,
             _links: links,
             _heads: heads,
             boundary,

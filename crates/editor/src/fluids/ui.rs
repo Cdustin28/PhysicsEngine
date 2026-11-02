@@ -84,9 +84,10 @@ impl FluidsEditor {
         ui.separator();
         let fluid = &self.world.fluid;
         ui.label(format!(
-            "{} particles · {} substeps",
+            "{} particles · {} substeps · {}",
             fluid.len(),
-            fluid.stats.substeps
+            fluid.stats.substeps,
+            if self.on_gpu() { "GPU" } else { "CPU" }
         ));
         if self.running {
             ui.separator();
@@ -379,6 +380,27 @@ impl FluidsEditor {
     }
 
     fn view_panel(&mut self, ui: &mut Ui) {
+        match self.gpu_name().map(str::to_owned) {
+            Some(name) => {
+                ui.checkbox(&mut self.settings.use_gpu, "Simulate on the GPU")
+                    .on_hover_text(format!(
+                        "Step the liquid as compute shaders on {name}: every liquid, heat, and plates. \
+                         Surface tension (millimetre particles) runs on the CPU."
+                    ));
+            }
+            None => {
+                ui.add_enabled(
+                    false,
+                    egui::Checkbox::new(&mut false, "Simulate on the GPU"),
+                )
+                .on_disabled_hover_text(if cfg!(target_arch = "wasm32") {
+                    "The GPU fluid solver needs the desktop app for now."
+                } else {
+                    "No GPU with compute shaders was found."
+                });
+            }
+        }
+        ui.separator();
         ui.heading("View");
         ui.checkbox(&mut self.settings.smooth, "Smooth surfaces")
             .on_hover_text("Draw the liquid as smooth, see-through surfaces instead of balls");

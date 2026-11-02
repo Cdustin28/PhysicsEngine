@@ -911,7 +911,7 @@ impl Fluid {
     /// nothing, so it doesn't disturb the pressure field, and mass and heat
     /// are conserved. For warm and cold water this stands in for convection
     /// on scales smaller than a particle.
-    fn settle_unresolved(&mut self, gravity: Vec3, dt: f32) {
+    pub fn settle_unresolved(&mut self, gravity: Vec3, dt: f32) {
         let g = gravity.length();
         let n = self.positions.len();
         if g == 0.0 || self.scratch.fluid_neighbors.len() != n {
@@ -1049,7 +1049,7 @@ impl Fluid {
     /// (Δt ≤ 0.125 h²ρ/μ) and surface tension (Δt ≤ 0.25 √(ρh³/2πσ),
     /// Brackbill et al. 1992), with h the smoothing length. Usually far
     /// above the CFL limit; it matters for thick oil and tiny particles.
-    fn material_dt_limit(&self) -> f32 {
+    pub fn material_dt_limit(&self) -> f32 {
         let present = self.present_liquids();
         let hs = 0.5 * self.params.support();
         let mut limit = f32::INFINITY;
@@ -1562,13 +1562,67 @@ impl Fluid {
             .sum()
     }
 
-    /// True if the GPU solver can step this fluid: fresh water, all at one
-    /// temperature, with no wall temperature (its shaders don't carry
-    /// heat or more than one liquid yet).
-    pub fn gpu_can_step(&self) -> bool {
-        self.is_fresh_water()
-            && self.params.wall_temperature.is_none()
-            && self.temperatures.windows(2).all(|w| w[0] == w[1])
+    /// True if the GPU solver can step this fluid. It handles every liquid,
+    /// heat, and held walls; only surface tension (on for particles small
+    /// enough to resolve it, a few millimetres) stays on the CPU. Salt
+    /// doesn't diffuse on the GPU (at its real rate it barely moves anyway).
+    pub fn gpu_can_step(&self, gravity: Vec3) -> bool {
+        !self.effects(gravity).surface_tension
+    }
+
+    /// Substeps a solver that can't check the fastest particle every
+    /// substep (the GPU) needs for a `dt` step: the CFL limit at the speed
+    /// cap with the lightest liquid's faster sound speed, and the liquids'
+    /// viscosity limit.
+    pub fn worst_case_substeps(&self, dt: f32) -> u32 {
+        let c = self.params.speed_of_sound;
+        let (heavy, light) = self.density_ratio_range();
+        let c_eff = c * (heavy / light).sqrt();
+        let cfl = CFL * self.params.particle_spacing / (c_eff + self.params.max_speed());
+        let limit = cfl.min(self.material_dt_limit());
+        ((dt / limit).ceil() as u32).max(1)
+    }
+
+    /// Tait stiffness every liquid shares: the heaviest one's, Pa.
+    pub fn shared_stiffness(&self) -> f32 {
+        let c = self.params.speed_of_sound;
+        self.params.rest_density * self.density_ratio_range().0 * c * c / TAIT_GAMMA as f32
+    }
+
+    /// True if heat conducts this step (temperatures differ, or a wall or
+    /// body holds one).
+    pub fn conducts_heat(&self, boundary: &Boundary) -> bool {
+        self.params.wall_temperature.is_some()
+            || boundary.has_temperatures()
+            || self.temperatures.windows(2).any(|w| w[0] != w[1])
+    }
+
+    /// Particle `i`'s properties as the solver uses them: mass (kg),
+    /// dynamic viscosity, conductivity (both scaled like the rest density),
+    /// specific heat, and rest-volume ratio from thermal expansion.
+    pub fn solver_properties(&self, i: usize) -> [f32; 5] {
+        let scale = self.params.rest_density / materials::WATER_DENSITY;
+        let liquid = self.liquid(i);
+        let s = self.salinity.get(i).copied().unwrap_or(0.0);
+        let t = self.temperature(i);
+        [
+            self.params.particle_mass() * density_ratio(liquid, s),
+            liquid.viscosity_at(s, t) * scale,
+            liquid.conductivity(s) * scale,
+            liquid.specific_heat(s),
+            1.0 / liquid.expansion_factor(t),
+        ]
+    }
+
+    /// The conductivity particle `i` uses against a wall held at `tw` (K):
+    /// the larger of its own and the wall heat-transfer coefficient as a
+    /// conductivity (see the CPU solver's wall term).
+    pub fn wall_conductivity(&self, i: usize, tw: f32) -> f32 {
+        let scale = self.params.rest_density / materials::WATER_DENSITY;
+        let liquid = self.liquid(i);
+        let s = self.salinity.get(i).copied().unwrap_or(0.0);
+        let h = liquid.wall_heat_transfer(s, self.temperature(i), tw);
+        (liquid.conductivity(s) * scale).max(h * self.params.particle_spacing * WALL_FILM)
     }
 
     /// Put `power` watts into the liquid within `radius` of `center` for
