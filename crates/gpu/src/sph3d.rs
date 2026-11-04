@@ -13,6 +13,7 @@ use engine3d::Vec3;
 use engine3d::fluid::boundary::Boundary;
 use engine3d::fluid::{BodyImpulse, Fluid, FluidSolver};
 use std::borrow::Cow;
+use std::time::Instant;
 
 const WORKGROUP: u32 = 64;
 
@@ -90,6 +91,19 @@ pub struct GpuSolver3d {
     sort_interval: u32,
     steps: u32,
     adapter_name: String,
+    /// Where the last step's time went.
+    pub timings: StepTimings,
+}
+
+/// Wall-clock milliseconds in each part of the last GPU step.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct StepTimings {
+    /// Preparing and uploading the particles, properties, and walls.
+    pub prepare: f64,
+    /// Submitting the substeps and waiting for the results.
+    pub gpu: f64,
+    /// Reading back and the CPU work after the step.
+    pub finish: f64,
 }
 
 impl GpuSolver3d {
@@ -104,6 +118,7 @@ impl GpuSolver3d {
             sort_interval: 10,
             steps: 0,
             adapter_name: adapter_name.into(),
+            timings: StepTimings::default(),
         }
     }
 
@@ -164,6 +179,7 @@ impl FluidSolver for GpuSolver3d {
         if fluid.is_empty() {
             return impulses;
         }
+        let clock = Instant::now();
         fluid.fill_missing_velocities();
         if self.steps.is_multiple_of(self.sort_interval) {
             fluid.sort_spatially();
@@ -254,12 +270,24 @@ impl FluidSolver for GpuSolver3d {
         // the temperature of the nearest held boundary particle.
         let any_held = held.iter().any(|&t| t >= 0.0);
         let h2 = h * h;
+        // Only particles within h of some held boundary particle need the
+        // lookup: the box around those, grown by h.
+        let (held_lo, held_hi) = boundary
+            .positions
+            .iter()
+            .zip(&held)
+            .filter(|(_, t)| **t >= 0.0)
+            .fold(
+                (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)),
+                |(lo, hi), (p, _)| (lo.min(*p), hi.max(*p)),
+            );
+        let (held_lo, held_hi) = (held_lo - Vec3::splat(h), held_hi + Vec3::splat(h));
         let material: Vec<[f32; 4]> = (0..n)
             .flat_map(|i| {
                 let [mass, mu, k, cp, volume_ratio] = fluid.solver_properties(i);
                 let mut k_wall = k;
-                if any_held && use_heat {
-                    let xi = fluid.positions[i];
+                let xi = fluid.positions[i];
+                if any_held && use_heat && xi.cmpge(held_lo).all() && xi.cmple(held_hi).all() {
                     let mut nearest = (h2, -1.0_f32);
                     boundary.grid.for_each_near(xi, |b, xb| {
                         let d2 = (xi - xb).length_squared();
@@ -317,15 +345,19 @@ impl FluidSolver for GpuSolver3d {
             (&p.boundary_impulse, groups(nb)),
             (&p.integrate, groups(n)),
         ];
-        for _ in 0..substeps {
-            for (pipeline, count) in stages {
-                if count == 0 {
-                    continue;
+        // One compute pass for every substep: wgpu puts a barrier between
+        // dispatches that share buffers, so the stages still run in order,
+        // without the cost of starting hundreds of passes a step.
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
+            pass.set_bind_group(0, &buffers.bind_group, &[]);
+            for _ in 0..substeps {
+                for (pipeline, count) in stages {
+                    if count > 0 {
+                        pass.set_pipeline(pipeline);
+                        pass.dispatch_workgroups(count, 1, 1);
+                    }
                 }
-                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
-                pass.set_pipeline(pipeline);
-                pass.set_bind_group(0, &buffers.bind_group, &[]);
-                pass.dispatch_workgroups(count, 1, 1);
             }
         }
 
@@ -350,9 +382,11 @@ impl FluidSolver for GpuSolver3d {
                 extra_bytes,
             );
         }
+        let prepared = clock.elapsed();
         self.queue.submit([encoder.finish()]);
 
         let particles: Vec<[f32; 4]> = read(&self.device, &buffers.read_particles, particle_bytes);
+        let computed = clock.elapsed();
         let scratch: Vec<[f32; 4]> = read(&self.device, &buffers.read_scratch, scratch_bytes);
         let extra: Vec<[f32; 4]> = if nb > 0 {
             read(&self.device, &buffers.read_boundary_extra, extra_bytes)
@@ -385,6 +419,12 @@ impl FluidSolver for GpuSolver3d {
                 imp.angular += (boundary.positions[b] - boundary.body_centers[body]).cross(j);
             }
         }
+        let ms = |d: std::time::Duration| d.as_secs_f64() * 1000.0;
+        self.timings = StepTimings {
+            prepare: ms(prepared),
+            gpu: ms(computed - prepared),
+            finish: ms(clock.elapsed() - computed),
+        };
         impulses
     }
 
