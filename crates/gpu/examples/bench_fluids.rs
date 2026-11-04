@@ -58,7 +58,7 @@ fn main() {
     };
     println!("GPU: {}", gpu.adapter_name());
     println!(
-        "{:>8} {:>10} {:>10} {:>12} {:>12}",
+        "{:>8} {:>10} {:>10} {:>12} {:>12}   last GPU step: prepare / compute / finish",
         "spacing", "particles", "substeps", "CPU", "GPU"
     );
     for spacing in [0.04, 0.03, 0.025] {
@@ -67,9 +67,13 @@ fn main() {
         let steps = if n > 20_000 { 3 } else { 8 };
         let (cpu, _) = time(&world, &mut CpuSolver, steps);
         let (g, subs) = time(&world, &mut gpu, steps);
+        let t = gpu.timings;
         println!(
-            "{:>6.1} cm {n:>10} {subs:>10} {cpu:>9.1} ms {g:>9.1} ms",
-            spacing * 100.0
+            "{:>6.1} cm {n:>10} {subs:>10} {cpu:>9.1} ms {g:>9.1} ms   {:.1} / {:.1} / {:.1} ms",
+            spacing * 100.0,
+            t.prepare,
+            t.gpu,
+            t.finish
         );
     }
 }
